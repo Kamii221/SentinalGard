@@ -15,6 +15,8 @@
 * monitors/correlation_monitor.py -- reads the events every other
   monitor writes, matches YAML rules/correlation scenarios, and
   writes Alert/Incident rows (Phase 11).
+* monitors/retention_monitor.py -- scheduled database retention
+  pruning (Phase 13).
 """
 
 from monitors.correlation_monitor import CorrelationMonitor
@@ -24,6 +26,7 @@ from monitors.network_monitor import NetworkMonitor
 from monitors.persistence_monitor import PersistenceMonitor
 from monitors.process_monitor import ProcessMonitor
 from monitors.queue_worker import QueueWriter
+from monitors.retention_monitor import RetentionMonitor
 
 __all__ = [
     "ProcessMonitor",
@@ -32,5 +35,6 @@ __all__ = [
     "PersistenceMonitor",
     "LogMonitor",
     "CorrelationMonitor",
+    "RetentionMonitor",
     "QueueWriter",
 ]

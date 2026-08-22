@@ -10,14 +10,14 @@ Allow Once / Always Allow / Always Block controls through a desktop GUI.
 Everything runs on `127.0.0.1` and stores events in a local SQLite
 database. Nothing is uploaded anywhere by default.
 
-> **Status:** Phase 12 of 13 complete (project structure, configuration,
+> **Status:** All 13 phases complete (project structure, configuration,
 > database schema, logging, local FastAPI agent + authentication,
 > PySide6 GUI + dashboard, Chrome/Edge/Firefox URL-monitoring
 > extensions, URL detection + allow/block engine, process monitoring,
 > file monitoring + hashing + YARA, network monitoring, persistence
 > monitoring, Windows log analyzer, behavior correlation + risk
-> scoring, quarantine + response actions). See "Build Order" below for
-> what's next.
+> scoring, quarantine + response actions, scheduled retention pruning,
+> and PyInstaller packaging). See "Build order" below.
 
 ## Architecture
 
@@ -588,6 +588,83 @@ the rule/correlation engine from Phase 11.
   Not gated by `confirm`: marking something as a false positive isn't
   destructive, it's just triage.
 
+### Testing, retention scheduling, and packaging (Phase 13)
+
+**Retention pruning is now actually scheduled.** `database/retention.py`'s
+`prune_old_records` has existed since Phase 1 as a callable, but nothing
+ever called it periodically — every table would have grown unbounded.
+`monitors/retention_monitor.py` fixes that: a `RetentionMonitor` runs
+once immediately at agent startup (so a never-before-pruned database
+gets cleaned up right away, not after a full day's wait) and then on
+`monitoring.retention_prune_interval_hours` (default 24h — pruning is
+cheap and doesn't need to run often, so this is deliberately the
+quietest monitor in the agent). Wired into `api/app.py`'s lifespan
+alongside every other monitor, starting last and stopping first.
+
+**End-to-end coverage.** Every other test file disables
+`settings.monitoring.enabled` for speed and isolation.
+`tests/test_end_to_end.py` is the one place that starts the real
+FastAPI app with all seven monitors enabled together and confirms the
+whole lifespan — startup order, shutdown order, nothing tripping over
+anything else — actually works, not just each monitor in isolation.
+`tests/test_main.py` adds coverage for `main.py`'s CLI argument parsing
+and bootstrap dispatch (`--serve` / `--gui` / bootstrap-only), which had
+no dedicated tests before.
+
+**A hardening pass on direct-DB-write monitors.** Writing the new
+retention monitor's "survives a broken session" test caught a real bug:
+`session = self._session_factory()` sat outside its own `try` block, so
+a failure in the session factory itself (e.g. a transient DB error)
+would propagate uncaught into the monitor's polling loop — which has no
+exception handling of its own — silently killing that background thread
+for the rest of the process's life, with no further pruning and no
+visible error. `process_monitor.py`, `file_monitor.py`,
+`network_monitor.py`, and `log_monitor.py` are naturally immune (they
+only ever write through `QueueWriter`, whose own `_flush` already wraps
+`write_batch` — session creation included — in a try/except), but
+`correlation_monitor.py` writes directly from its own thread the same
+way `retention_monitor.py` does, and had the identical gap in both
+`_run` (the startup query) and `_poll_once`. Fixed in all three
+locations: session creation now happens inside its own guarded block
+so a factory failure is logged and the monitor keeps polling on the
+next interval, instead of dying silently.
+
+**PyInstaller packaging.** `sentinelguard.spec` builds a onedir bundle
+(a folder of an executable plus its dependencies — the standard choice
+for an app that runs a background agent thread continuously, since
+onefile's per-launch extract-to-temp-dir cost isn't a good fit here):
+
+```bash
+pip install -r requirements.txt
+pyinstaller sentinelguard.spec
+# Output: dist/SentinelGuard/ (SentinelGuard.exe on Windows)
+```
+
+It bundles `config/default_config.yaml`, `rules/*.yaml`, and
+`yara/*.yar` as data files (the code locates them via
+`Path(__file__).resolve().parent`, which still resolves correctly
+inside a frozen bundle as long as the data lands at the matching
+relative path — which the spec's `datas` list ensures). Hidden imports
+cover `watchdog.observers`' platform-specific backend modules (picked
+at import time based on the OS, which PyInstaller's static analysis
+can't see) and, only when building on Windows, pywin32's
+`win32timezone`/`win32com.shell` (imported by name rather than via a
+traceable `import` statement, and not installed at all on other
+platforms — the spec guards this behind `sys.platform == "win32"` so a
+build on another OS doesn't fail trying to resolve a package that isn't
+there).
+
+**Honest caveat, same pattern as Phases 9/10/12:** the spec has been
+built and smoke-tested on Linux — confirming the packaging mechanics
+work end to end (data files land at the right paths, the frozen binary
+boots, starts every monitor including the new retention one, serves
+`/health` and `/status`, and shuts down cleanly on SIGINT with monitors
+stopping in the correct reverse order) — but that only proves the
+*packaging* is correct. It does not exercise the Windows-only backends
+themselves (registry/service/task persistence enumeration, Windows
+Event Log reading), which still need a real-Windows spot-check, same as
+their unpackaged counterparts.
+
 ## Testing
 
 ```bash
@@ -605,9 +682,9 @@ deep-merged on top and validated with Pydantic. Notably:
 * `risk.*_max` thresholds must be strictly increasing and map to the
   Informational / Low / Medium / High / Critical bands used everywhere
   in the app.
-* `retention.*_days` controls how long each table's rows are kept
-  (`database/retention.py` prunes on request; periodic scheduling is
-  wired up once the background agent exists).
+* `retention.*_days` controls how long each table's rows are kept;
+  `monitoring.retention_prune_interval_hours` (default 24h) controls how
+  often `monitors/retention_monitor.py` runs the prune.
 
 ## Privileges
 
@@ -631,7 +708,7 @@ reduced-functionality fallback when not running elevated.
 10. ✅ Windows log analyzer
 11. ✅ Behavior correlation + risk scoring
 12. ✅ Quarantine + response actions
-13. Testing, performance optimization, PyInstaller packaging
+13. ✅ Testing, performance optimization, PyInstaller packaging
 
 ## Privacy
 

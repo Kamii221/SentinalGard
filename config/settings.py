@@ -148,6 +148,9 @@ class MonitoringConfig(BaseModel):
     # How far back correlation scenarios look for their steps to have
     # all occurred -- a rolling window, not a fixed lookback from now.
     correlation_window_minutes: float = Field(default=15.0, gt=0)
+    # Retention pruning (database/retention.py) is cheap and doesn't
+    # need to run often -- once a day is plenty for a personal machine.
+    retention_prune_interval_hours: float = Field(default=24.0, gt=0)
 
 
 class ResponseConfig(BaseModel):

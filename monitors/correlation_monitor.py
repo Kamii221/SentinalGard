@@ -94,18 +94,25 @@ class CorrelationMonitor:
     def _run(self) -> None:
         # Start from the current max event id so we never replay old
         # history on startup, same philosophy as the other monitors.
-        session = self._session_factory()
         try:
-            max_id = session.execute(select(Event.id).order_by(Event.id.desc()).limit(1)).scalar_one_or_none()
-            self._last_event_id = max_id or 0
-        finally:
-            session.close()
+            session = self._session_factory()
+            try:
+                max_id = session.execute(select(Event.id).order_by(Event.id.desc()).limit(1)).scalar_one_or_none()
+                self._last_event_id = max_id or 0
+            finally:
+                session.close()
+        except Exception:
+            _log.exception("Correlation monitor failed to determine the starting event id; starting from 0")
 
         while not self._stop_event.wait(self._config.correlation_poll_interval_seconds):
             self._poll_once()
 
     def _poll_once(self) -> None:
-        session = self._session_factory()
+        try:
+            session = self._session_factory()
+        except Exception:
+            _log.exception("Correlation monitor poll failed: could not open a database session")
+            return
         try:
             self._run_condition_rules(session)
             self._run_correlation(session)
