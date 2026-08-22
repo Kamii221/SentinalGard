@@ -140,6 +140,9 @@ class MonitoringConfig(BaseModel):
     # change far less often than processes/connections, so a much
     # longer poll interval is appropriate.
     persistence_poll_interval_seconds: float = Field(default=30.0, gt=0)
+    # Windows Event Log channels aren't as time-critical as live
+    # process/network activity but are more so than persistence.
+    log_poll_interval_seconds: float = Field(default=15.0, gt=0)
 
 
 class Settings(BaseModel):

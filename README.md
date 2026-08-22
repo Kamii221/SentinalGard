@@ -10,12 +10,13 @@ Allow Once / Always Allow / Always Block controls through a desktop GUI.
 Everything runs on `127.0.0.1` and stores events in a local SQLite
 database. Nothing is uploaded anywhere by default.
 
-> **Status:** Phase 9 of 13 complete (project structure, configuration,
+> **Status:** Phase 10 of 13 complete (project structure, configuration,
 > database schema, logging, local FastAPI agent + authentication,
 > PySide6 GUI + dashboard, Chrome/Edge/Firefox URL-monitoring
 > extensions, URL detection + allow/block engine, process monitoring,
 > file monitoring + hashing + YARA, network monitoring, persistence
-> monitoring). See "Build Order" below for what's next.
+> monitoring, Windows log analyzer). See "Build Order" below for
+> what's next.
 
 ## Architecture
 
@@ -375,6 +376,61 @@ database) *was* verified end-to-end using synthetic entries injected
 through the same backend-injection interface the real Windows
 backends implement.
 
+### Windows log analyzer (Phase 10)
+
+`monitors/log_monitor.py` polls a focused set of security-relevant
+Windows Event Log channels — **Security** (process creation, failed/
+privileged logons, account/group changes), **System** (service
+installs), **Microsoft-Windows-PowerShell/Operational** (script block
+logging), and **Microsoft-Windows-Windows Defender/Operational**
+(threat detections) — and normalizes matched events into the spec's
+exact common event schema
+(`timestamp`/`host`/`event_type`/`source`/`process`/`user`/`severity`/
+`risk_score`/`details`), which is precisely the existing `events`
+table from Phase 1 — no new table was needed.
+
+Each channel is polled independently
+(`monitoring.log_poll_interval_seconds`, default 15s) using an XPath
+time filter (`TimeCreated[@SystemTime>'...']`) so each poll only asks
+the Event Log API for events newer than the last one seen on that
+channel — never a full-log rescan. Each channel's cursor starts at the
+monitor's launch time, so restarting the agent never replays old
+history.
+
+`detection/log_analysis.py` classifies each event: PowerShell script
+blocks and process command lines get scanned for the same suspicious
+keywords used elsewhere (`detection/lolbins.py`), account/service
+changes get a moderate baseline score, and Windows Defender's own
+detections (1116/1117) are scored high directly — that's a vendor AV
+engine's verdict already, not a weak local heuristic, so it's the one
+exception to "never claim malicious from a weak signal."
+
+Some channels — notably Security, and often PowerShell script block
+logging and Defender — require specific Windows audit policies /
+group policies to be enabled before they populate at all (e.g. "Audit
+Process Creation" + "Include command line in process creation events"
+for full 4688 visibility, "Turn on PowerShell Script Block Logging"
+for 4104). SentinelGuard reads what's there; it doesn't enable these
+policies itself. Reading the Security channel typically also requires
+Administrator privileges; access failures degrade to "no events from
+this channel" rather than crashing.
+
+**Caveat, same as Phase 9's registry/task/service backends**: the
+actual `win32evtlog` reading (`read_new_events_win32evtlog`) uses APIs
+that only exist on Windows and could not be run in this project's
+Linux development environment. It's written against the documented,
+stable "Windows Event Log XML" rendering schema, and that XML-parsing
+and classification logic *is* thoroughly tested against realistic
+sample XML matching the real schema (including both the
+`EventData`-based shape most providers use and the `UserData`-based
+shape PowerShell's operational log uses) — but the `win32evtlog` call
+sequence itself should be spot-checked on a real Windows machine.
+
+Correlating these events with everything else — the spec's own
+"Office process → PowerShell → network connection → executable
+created → persistence created ⇒ one incident" example — is Phase 11's
+job. This phase only classifies one event at a time.
+
 ## Testing
 
 ```bash
@@ -415,7 +471,7 @@ reduced-functionality fallback when not running elevated.
 7. ✅ File monitoring + hashing + YARA
 8. ✅ Network monitoring
 9. ✅ Persistence monitoring
-10. Windows log analyzer
+10. ✅ Windows log analyzer
 11. Behavior correlation + risk scoring
 12. Quarantine + response actions
 13. Testing, performance optimization, PyInstaller packaging
