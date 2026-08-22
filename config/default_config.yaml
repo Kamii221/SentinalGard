@@ -51,3 +51,6 @@ monitoring:
   log_poll_interval_seconds: 15.0
   correlation_poll_interval_seconds: 10.0
   correlation_window_minutes: 15.0
+
+response:
+  quarantine_dir: null

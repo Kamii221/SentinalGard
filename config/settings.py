@@ -150,6 +150,17 @@ class MonitoringConfig(BaseModel):
     correlation_window_minutes: float = Field(default=15.0, gt=0)
 
 
+class ResponseConfig(BaseModel):
+    # None => <data_dir>/quarantine. See config.settings.resolved_quarantine_dir.
+    quarantine_dir: Optional[str] = None
+
+
+def resolved_quarantine_dir(settings: "Settings") -> Path:
+    if settings.response.quarantine_dir:
+        return Path(settings.response.quarantine_dir)
+    return settings.data.resolved_data_dir() / "quarantine"
+
+
 class Settings(BaseModel):
     app: AppConfig = Field(default_factory=AppConfig)
     data: DataConfig = Field(default_factory=DataConfig)
@@ -158,6 +169,7 @@ class Settings(BaseModel):
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
+    response: ResponseConfig = Field(default_factory=ResponseConfig)
 
 
 __all__ = [
@@ -168,8 +180,10 @@ __all__ = [
     "RetentionConfig",
     "RiskConfig",
     "MonitoringConfig",
+    "ResponseConfig",
     "Settings",
     "default_data_dir",
+    "resolved_quarantine_dir",
     "load_settings",
     "get_settings",
 ]
