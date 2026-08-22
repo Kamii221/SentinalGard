@@ -12,6 +12,10 @@ from config.settings import load_settings
 def app_settings(tmp_path: Path):
     settings = load_settings()
     settings.data.data_dir = tmp_path
+    # Process monitoring is exercised in tests/test_process_monitor.py;
+    # keep it off here so these tests don't spin up a real background
+    # psutil polling thread.
+    settings.monitoring.enabled = False
     return settings
 
 

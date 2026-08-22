@@ -118,6 +118,14 @@ class RiskConfig(BaseModel):
         return v
 
 
+class MonitoringConfig(BaseModel):
+    enabled: bool = True
+    process_poll_interval_seconds: float = Field(default=2.0, gt=0)
+    # New-process executables larger than this are never hashed (avoids
+    # stalling the writer thread on huge binaries).
+    process_hash_max_bytes: int = Field(default=25_000_000, gt=0)
+
+
 class Settings(BaseModel):
     app: AppConfig = Field(default_factory=AppConfig)
     data: DataConfig = Field(default_factory=DataConfig)
@@ -125,6 +133,22 @@ class Settings(BaseModel):
     api: ApiConfig = Field(default_factory=ApiConfig)
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
+    monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
+
+
+__all__ = [
+    "AppConfig",
+    "DataConfig",
+    "LoggingConfig",
+    "ApiConfig",
+    "RetentionConfig",
+    "RiskConfig",
+    "MonitoringConfig",
+    "Settings",
+    "default_data_dir",
+    "load_settings",
+    "get_settings",
+]
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
