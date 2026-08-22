@@ -10,10 +10,11 @@ Allow Once / Always Allow / Always Block controls through a desktop GUI.
 Everything runs on `127.0.0.1` and stores events in a local SQLite
 database. Nothing is uploaded anywhere by default.
 
-> **Status:** Phase 4 of 13 complete (project structure, configuration,
+> **Status:** Phase 5 of 13 complete (project structure, configuration,
 > database schema, logging, local FastAPI agent + authentication,
 > PySide6 GUI + dashboard, Chrome/Edge/Firefox URL-monitoring
-> extensions). See "Build Order" below for what's next.
+> extensions, URL detection + allow/block engine). See "Build Order"
+> below for what's next.
 
 ## Architecture
 
@@ -141,13 +142,10 @@ navigations, sends only the URL to `POST /api/v1/websites/check`, and
 redirects to a blocked page if the agent says so. The popup and
 blocked page offer Allow Once / Block / Always Allow / Always Block.
 
-The agent gained three endpoints to support this:
+The agent has three endpoints to support this:
 
 * `POST /api/v1/websites/check` — logs the navigation and returns a
-  decision. The decision logic itself is intentionally basic for
-  now (exact-domain match against `allowlist`/`blocklist`, default
-  "allow, no detection") — Phase 5's URL detection engine replaces
-  that internal logic without changing this contract.
+  decision.
 * `GET /api/v1/websites/lookup?url=...` — same decision logic, used
   by the popup for display; doesn't log a `Website` row.
 * `POST /api/v1/websites/decision` — records a manual Allow Once /
@@ -158,6 +156,41 @@ The domain used for every decision is always derived server-side from
 the validated URL (`urlparse(url).hostname`) rather than trusted from
 a client-supplied field, so a request can't send mismatched URL/domain
 data.
+
+### URL detection + allow/block engine (Phase 5)
+
+The user's `allowlist`/`blocklist` entries always take priority (exact
+domain match). Otherwise every check runs through
+`detection/url_analysis.py`, which combines independent local
+heuristics (`detection/indicators.py`) into one explainable score:
+
+* IP-address destinations, suspicious TLDs (`.tk`, `.top`, `.xyz`, …),
+  IDN/punycode domains, the classic `user@host` disguise trick,
+  excessive subdomain chains, brand-name-in-hostname impersonation,
+  phishing keyword clusters in the path/query, direct links to
+  executables/scripts, embedded open-redirect parameters, unusually
+  heavy percent-encoding, and high-entropy (DGA-like) domain labels.
+
+**No single indicator alone ever reaches High/Critical** — each one
+only contributes points (10-30), so a block requires several
+independent signals to agree, per the spec's rule against overclaiming
+from a weak heuristic. A URL that lands in the High or Critical band
+is auto-blocked; Medium and below stay `allow` (with the reasons still
+visible via `/lookup` and the popup). Unlike system-level response
+actions, a URL block here is cheap and instantly reversible from the
+blocked page, so it doesn't need extra confirmation.
+
+`detection/reputation.py` defines a pluggable `ReputationProvider`
+interface for future threat-intel integrations; the only implementation
+today is `NullReputationProvider`, which always returns "no data" and
+never makes a network call — SentinelGuard stays fully offline until a
+real provider is explicitly configured (none is, yet).
+
+Known calibration point: two indicators alone (e.g. a raw IP host +
+direct `.exe` link) score around 35 — still "allow" under the default
+thresholds. This is a deliberate conservative default, not an
+oversight; revisit the point values in `detection/indicators.py` once
+there's real usage data to tune against.
 
 ## Testing
 
@@ -194,7 +227,7 @@ reduced-functionality fallback when not running elevated.
 2. ✅ FastAPI localhost agent + authentication
 3. ✅ PySide6 GUI + dashboard
 4. ✅ Chrome/Edge/Firefox URL-monitoring extensions
-5. URL detection + allow/block engine
+5. ✅ URL detection + allow/block engine
 6. Process monitoring
 7. File monitoring + hashing + YARA
 8. Network monitoring

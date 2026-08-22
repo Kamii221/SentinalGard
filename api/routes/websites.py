@@ -1,11 +1,14 @@
 """Website navigation checks and manual allow/block decisions.
 
-``check``/``lookup`` share the same lightweight decision logic: an
-exact-match lookup against the ``allowlist``/``blocklist`` tables,
-defaulting to "allow" with no detection. The full heuristic URL
-detection engine (Phase 5) will replace ``_decide``'s fallback branch
-without changing this API contract — extensions and the GUI are
-already coded against the final shape.
+``check``/``lookup`` share the same decision logic: an exact-match
+list lookup against ``allowlist``/``blocklist`` takes priority (the
+user's explicit word is final), and otherwise falls through to the
+local URL heuristic engine (detection/url_analysis.py). A URL that
+scores High/Critical is auto-blocked -- unlike system-level response
+actions (kill process, quarantine, etc.), a URL block here is cheap
+and instantly reversible (Allow Once / Always Allow from the blocked
+page), so it doesn't need the same "avoid aggressive automatic
+remediation" caution the spec asks for elsewhere.
 """
 
 from __future__ import annotations
@@ -29,13 +32,15 @@ from api.schemas import (
     normalize_url,
 )
 from api.security import require_agent_token
-from config.settings import Settings
+from config.settings import RiskConfig, Settings
 from database.models import AllowlistEntry, BlocklistEntry, Website
-from detection.risk import severity_for_risk
+from detection.risk import Severity, severity_for_risk
+from detection.url_analysis import analyze_url
 
 router = APIRouter(prefix="/websites", tags=["websites"], dependencies=[Depends(require_agent_token)])
 
 _ALLOW_ONCE_DURATION = dt.timedelta(hours=1)
+_AUTO_BLOCK_SEVERITIES = frozenset({"high", "critical"})
 
 
 def _now() -> dt.datetime:
@@ -69,10 +74,12 @@ def _remove_list_entry(session: Session, model, domain: str) -> None:
     session.commit()
 
 
-def _decide(session: Session, domain: str) -> tuple[str, int, str]:
+def _decide(session: Session, url: str, domain: str, risk_config: RiskConfig) -> tuple[str, int, str, Severity]:
     blocked = _find_list_entry(session, BlocklistEntry, domain)
     if blocked is not None:
-        return "block", 95, f"Domain is on your blocklist ({blocked.reason or 'no reason given'})"
+        risk = 95
+        reason = f"Domain is on your blocklist ({blocked.reason or 'no reason given'})"
+        return "block", risk, reason, severity_for_risk(risk, risk_config)
 
     allowed = _find_list_entry(session, AllowlistEntry, domain)
     if allowed is not None:
@@ -81,10 +88,14 @@ def _decide(session: Session, domain: str) -> tuple[str, int, str]:
             session.commit()
         else:
             action = "allow_once" if allowed.expires_at is not None else "allow"
-            return action, 0, f"Domain is on your allowlist ({allowed.reason or 'user approved'})"
+            risk = 0
+            reason = f"Domain is on your allowlist ({allowed.reason or 'user approved'})"
+            return action, risk, reason, severity_for_risk(risk, risk_config)
 
-    # Placeholder default until Phase 5 wires in the full URL detection engine.
-    return "allow", 0, "No detection"
+    analysis = analyze_url(url, risk_config)
+    action = "block" if analysis.severity in _AUTO_BLOCK_SEVERITIES else "allow"
+    reason = "; ".join(analysis.reasons)
+    return action, analysis.risk, reason, analysis.severity
 
 
 @router.post("/check", response_model=WebsiteCheckResponse)
@@ -94,7 +105,7 @@ def check_website(
     settings: Settings = Depends(get_settings_dep),
 ) -> WebsiteCheckResponse:
     domain = extract_domain(payload.url)
-    action, risk, reason = _decide(session, domain)
+    action, risk, reason, severity = _decide(session, payload.url, domain, settings.risk)
 
     session.add(
         Website(
@@ -103,7 +114,7 @@ def check_website(
             browser=payload.browser,
             scheme=urlparse(payload.url).scheme,
             risk_score=risk,
-            severity=severity_for_risk(risk, settings.risk),
+            severity=severity,
             reason=reason,
             action=action,
         )
@@ -115,7 +126,9 @@ def check_website(
 
 @router.get("/lookup", response_model=WebsiteCheckResponse)
 def lookup_website(
-    url: str = Query(..., max_length=MAX_URL_LENGTH), session: Session = Depends(get_db)
+    url: str = Query(..., max_length=MAX_URL_LENGTH),
+    session: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings_dep),
 ) -> WebsiteCheckResponse:
     """Read-only version of /check used by the popup UI; does not log a Website row."""
     try:
@@ -124,7 +137,7 @@ def lookup_website(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    action, risk, reason = _decide(session, domain)
+    action, risk, reason, _severity = _decide(session, clean_url, domain, settings.risk)
     return WebsiteCheckResponse(action=action, risk=risk, reason=reason)
 
 

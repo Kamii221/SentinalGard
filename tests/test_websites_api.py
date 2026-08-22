@@ -189,6 +189,41 @@ def test_allow_once_expires(client: TestClient, app, auth_headers: dict[str, str
     assert expired_check.json() == {"action": "allow", "risk": 0, "reason": "No detection"}
 
 
+def test_check_auto_blocks_severe_heuristic_combination(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    resp = client.post(
+        "/api/v1/websites/check",
+        json={"url": "http://paypal.security-verify-login.tk/account/verify-login.exe", "browser": "chrome"},
+        headers=auth_headers,
+    )
+    body = resp.json()
+    assert body["action"] == "block"
+    assert body["risk"] > 60
+    assert "No detection" not in body["reason"]
+
+
+def test_check_allows_mildly_suspicious_url(client: TestClient, auth_headers: dict[str, str]) -> None:
+    resp = client.post(
+        "/api/v1/websites/check",
+        json={"url": "http://some-blog.tk/", "browser": "chrome"},
+        headers=auth_headers,
+    )
+    body = resp.json()
+    assert body["action"] == "allow"
+
+
+def test_user_allowlist_overrides_heuristic_block(client: TestClient, auth_headers: dict[str, str]) -> None:
+    url = "http://paypal.security-verify-login.tk/account/verify-login.exe"
+    client.post(
+        "/api/v1/websites/decision",
+        json={"url": url, "browser": "chrome", "decision": "always_allow"},
+        headers=auth_headers,
+    )
+    resp = client.post("/api/v1/websites/check", json={"url": url, "browser": "chrome"}, headers=auth_headers)
+    assert resp.json()["action"] == "allow"
+
+
 def test_block_decision_does_not_create_list_entry(
     client: TestClient, app, auth_headers: dict[str, str]
 ) -> None:
