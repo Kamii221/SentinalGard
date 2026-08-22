@@ -37,3 +37,8 @@ risk:
   low_max: 40
   medium_max: 60
   high_max: 80
+
+monitoring:
+  enabled: true
+  process_poll_interval_seconds: 2.0
+  process_hash_max_bytes: 25000000

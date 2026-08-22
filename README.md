@@ -10,11 +10,11 @@ Allow Once / Always Allow / Always Block controls through a desktop GUI.
 Everything runs on `127.0.0.1` and stores events in a local SQLite
 database. Nothing is uploaded anywhere by default.
 
-> **Status:** Phase 5 of 13 complete (project structure, configuration,
+> **Status:** Phase 6 of 13 complete (project structure, configuration,
 > database schema, logging, local FastAPI agent + authentication,
 > PySide6 GUI + dashboard, Chrome/Edge/Firefox URL-monitoring
-> extensions, URL detection + allow/block engine). See "Build Order"
-> below for what's next.
+> extensions, URL detection + allow/block engine, process monitoring).
+> See "Build Order" below for what's next.
 
 ## Architecture
 
@@ -192,6 +192,45 @@ thresholds. This is a deliberate conservative default, not an
 oversight; revisit the point values in `detection/indicators.py` once
 there's real usage data to tune against.
 
+### Process monitoring (Phase 6)
+
+`monitors/process_monitor.py` polls the process table (via `psutil`)
+on a background thread at a configurable interval
+(`monitoring.process_poll_interval_seconds`, default 2s) and diffs it
+against the previous snapshot to detect creation and termination.
+Windows doesn't expose a lightweight process-creation event API
+without WMI/ETW (that's Phase 10 territory), so polling is the
+practical, dependency-light approach here — a known trade-off is that
+very short-lived processes between polls can be missed, and a process
+created in the exact same instant as the monitor's startup seed can
+skip its "creation" event (it's still tracked from the next poll
+onward).
+
+For every newly created process it records both a `processes` row and
+a normalized `events` row (`event_type=process_create`), capturing
+PID/PPID, executable path, command line, user, and — only for new
+processes, never a continuous sweep — a SHA-256 hash (skipped above
+`monitoring.process_hash_max_bytes`, default 25MB) and, on Windows
+with sufficient privileges, the process integrity level via `pywin32`
+(`None` everywhere else or when unavailable). Two lightweight built-in
+heuristics score each new process: a LOLBin-name check (powershell,
+cmd, wscript, regsvr32, rundll32, certutil, …) and a suspicious
+PowerShell command-line check (mirroring the spec's own example YAML
+rule — `-encodedcommand`, `downloadstring`, `invoke-webrequest`, …).
+This is intentionally not the full YAML rule engine (Phase 10-11) —
+just real, explainable severity data for the dashboard and later
+correlation to build on. No `Alert` rows are created here; Phase 11's
+correlation engine decides what becomes a user-facing alert.
+
+DB writes go through `monitors/queue_worker.py`'s `QueueWriter` — a
+small reusable queue + batched-write background thread that Phase
+7-9's file/network/persistence monitors will reuse, per the
+performance spec's queue-based processing and batched-writes
+requirements.
+
+The monitor starts automatically whenever the agent runs (`--serve` or
+`--gui`), controlled by `monitoring.enabled` (default `true`).
+
 ## Testing
 
 ```bash
@@ -228,7 +267,7 @@ reduced-functionality fallback when not running elevated.
 3. ✅ PySide6 GUI + dashboard
 4. ✅ Chrome/Edge/Firefox URL-monitoring extensions
 5. ✅ URL detection + allow/block engine
-6. Process monitoring
+6. ✅ Process monitoring
 7. File monitoring + hashing + YARA
 8. Network monitoring
 9. Persistence monitoring

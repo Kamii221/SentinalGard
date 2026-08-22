@@ -17,6 +17,10 @@ def _settings_with_port(tmp_path: Path, port: int):
     settings = load_settings()
     settings.data.data_dir = tmp_path
     settings.api.port = port
+    # Process monitoring is exercised in tests/test_process_monitor.py;
+    # keep it off here so these tests don't spin up a real background
+    # psutil polling thread.
+    settings.monitoring.enabled = False
     return settings
 
 
