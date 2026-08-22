@@ -1,0 +1,40 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>SentinelGuard Settings</title>
+  <style>
+    body { font-family: "Segoe UI", sans-serif; background: #11151c; color: #e6e9ef; max-width: 480px; margin: 40px auto; padding: 0 16px; }
+    h1 { font-size: 18px; }
+    p { color: #9aa4b2; font-size: 13px; line-height: 1.5; }
+    code { background: #1a212c; padding: 2px 6px; border-radius: 4px; }
+    label { display: block; margin-top: 16px; font-size: 13px; }
+    input { width: 100%; box-sizing: border-box; margin-top: 6px; padding: 8px; background: #1a212c; border: 1px solid #232c3a; border-radius: 6px; color: #e6e9ef; }
+    button { margin-top: 16px; padding: 8px 16px; background: #4f8cff; border: none; border-radius: 6px; color: white; cursor: pointer; }
+    #saved { color: #4fd1a5; font-size: 12px; margin-top: 8px; display: none; }
+  </style>
+</head>
+<body>
+  <h1>SentinelGuard Web Filter — Setup</h1>
+  <p>
+    This extension talks only to the SentinelGuard agent running on
+    your own computer at <code>127.0.0.1</code>. Pair it once by
+    pasting the agent's token below.
+  </p>
+  <p>
+    Find the token in the file
+    <code>%APPDATA%\SentinelGuard\agent_token</code> (Windows) — open
+    it in Notepad and copy its contents. Nothing here is sent anywhere
+    except your own machine.
+  </p>
+  <label for="token">Agent token</label>
+  <input type="password" id="token" placeholder="Paste the contents of agent_token" autocomplete="off" />
+
+  <label for="baseUrl">Agent address (only change if you edited api.port)</label>
+  <input type="text" id="baseUrl" placeholder="http://127.0.0.1:8765/api/v1" />
+
+  <button id="save">Save</button>
+  <div id="saved">Saved.</div>
+  <script src="options.js"></script>
+</body>
+</html>

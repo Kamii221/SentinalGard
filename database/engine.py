@@ -8,16 +8,12 @@ writes from background threads while a GUI reads concurrently.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterator
 
 from sqlalchemy import Engine, create_engine, event
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 
 from config.settings import Settings
 from database.models import Base
-
-_engine: Engine | None = None
-_SessionLocal: sessionmaker | None = None
 
 
 def _apply_sqlite_pragmas(dbapi_connection, _connection_record) -> None:
@@ -39,28 +35,19 @@ def create_db_engine(db_path: Path) -> Engine:
     return engine
 
 
-def init_engine(settings: Settings) -> Engine:
-    """Initialize (or return the existing) process-wide engine/session factory."""
-    global _engine, _SessionLocal
-    if _engine is None:
-        _engine = create_db_engine(settings.data.resolved_db_path())
-        _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
-    return _engine
+def create_session_factory(engine: Engine) -> sessionmaker:
+    return sessionmaker(bind=engine, expire_on_commit=False, future=True)
 
 
 def init_db(settings: Settings) -> Engine:
-    """Create all tables that don't already exist."""
-    engine = init_engine(settings)
+    """Create an engine bound to ``settings`` and create all tables that
+    don't already exist.
+
+    Deliberately not cached process-wide: callers (the CLI bootstrap, the
+    FastAPI app, tests) each own the engine/sessionmaker they get back, so
+    running against different settings (e.g. isolated per-test databases)
+    never silently reuses another instance's connection.
+    """
+    engine = create_db_engine(settings.data.resolved_db_path())
     Base.metadata.create_all(engine)
     return engine
-
-
-def get_session() -> Iterator[Session]:
-    """Yield a session for a single unit of work; call ``init_db`` first."""
-    if _SessionLocal is None:
-        raise RuntimeError("Database not initialized; call init_db(settings) first")
-    session = _SessionLocal()
-    try:
-        yield session
-    finally:
-        session.close()

@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "SentinelGuard Web Filter",
+  "version": "0.1.0",
+  "description": "Sends page navigations to your local SentinelGuard agent for a real-time allow/block decision. Only URL metadata is sent -- never passwords, form data, cookies, or page content.",
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": ["webNavigation", "tabs", "storage"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "options_page": "options.html"
+}

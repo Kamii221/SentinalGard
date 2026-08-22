@@ -1,4 +1,4 @@
-from database.engine import get_session, init_db, init_engine
+from database.engine import create_db_engine, create_session_factory, init_db
 from database.models import (
     Alert,
     AllowlistEntry,
@@ -19,8 +19,8 @@ from database.retention import prune_old_records
 __all__ = [
     "Base",
     "init_db",
-    "init_engine",
-    "get_session",
+    "create_db_engine",
+    "create_session_factory",
     "prune_old_records",
     "Event",
     "Alert",
