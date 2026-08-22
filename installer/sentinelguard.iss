@@ -50,6 +50,10 @@ Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayIcon={app}\{#MyAppExeName}
+; The installer's own icon (Explorer, the wizard window, Add/Remove
+; Programs). Shortcuts don't need this set separately -- they point at
+; the .exe, which sentinelguard.spec already bakes this same icon into.
+SetupIconFile=..\assets\icon.ico
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

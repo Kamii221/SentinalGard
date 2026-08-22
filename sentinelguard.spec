@@ -80,6 +80,11 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    # Also what Explorer, the taskbar, and Alt-Tab show before the
+    # window paints (and thus sets its own icon via
+    # gui/main_window.py's setWindowIcon) -- see scripts/generate_icon.py
+    # for how this file is produced.
+    icon="assets/icon.ico",
 )
 
 coll = COLLECT(

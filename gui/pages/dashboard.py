@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QGridLayout, QLabel, QVBoxLayout, QWidget
 
@@ -24,9 +26,10 @@ _TILES = [
 
 
 class DashboardPage(QWidget):
-    def __init__(self, client: AgentClient) -> None:
+    def __init__(self, client: AgentClient, log_dir: Path) -> None:
         super().__init__()
         self._client = client
+        self._log_dir = log_dir
 
         self._status_label = QLabel("Checking protection status…")
         self._status_label.setObjectName("protectionStatus")
@@ -56,7 +59,7 @@ class DashboardPage(QWidget):
             status = self._client.status()
         except AgentClientError as exc:
             _log.warning("Dashboard refresh failed: %s", exc)
-            self._status_label.setText("⚠ Agent unreachable")
+            self._status_label.setText(f"⚠ Agent unreachable — see logs in {self._log_dir}")
             return
 
         state = status.get("protection_status", "unknown")

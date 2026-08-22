@@ -45,6 +45,22 @@ class AgentHandle:
 
     thread: threading.Thread
     server: uvicorn.Server
+    # A mutable single-item box rather than a plain attribute the thread
+    # assigns directly: dataclasses.replace()-style copying aside, this
+    # keeps "did the thread capture an error" trivially checkable
+    # (`error_box` non-empty) without needing a sentinel value for "not
+    # started failing yet" vs. "failed with error 'None'".
+    error_box: list[BaseException]
+
+    @property
+    def error(self) -> BaseException | None:
+        """Set once the server thread exits, if it exited abnormally
+        (most commonly: the port was already taken by another instance).
+        A windowed PyInstaller build has no console for an uncaught
+        thread exception's traceback to print to, so without this the
+        failure is completely invisible -- the GUI just sits there
+        reporting the agent unreachable with no way to find out why."""
+        return self.error_box[0] if self.error_box else None
 
     def stop(self, timeout: float = 5.0) -> None:
         self.server.should_exit = True
@@ -54,14 +70,24 @@ class AgentHandle:
 def start_agent_in_background(settings: Settings) -> AgentHandle:
     """Start the agent on a daemon thread; returns a handle to stop it later."""
     server = _build_server(settings)
+    error_box: list[BaseException] = []
 
     def _run() -> None:
-        asyncio.run(server.serve())
+        try:
+            asyncio.run(server.serve())
+        except BaseException as exc:
+            # uvicorn signals a startup failure (e.g. the port is
+            # already in use) with sys.exit(), which raises SystemExit
+            # -- a BaseException, not an Exception -- so `except
+            # Exception` here would silently miss the exact case this
+            # exists to catch.
+            error_box.append(exc)
+            _log.exception("Agent failed to start")
 
     thread = threading.Thread(target=_run, name="sentinelguard-agent", daemon=True)
     thread.start()
     _log.info("Agent starting in background thread on %s:%d", settings.api.host, settings.api.port)
-    return AgentHandle(thread=thread, server=server)
+    return AgentHandle(thread=thread, server=server, error_box=error_box)
 
 
 def wait_for_agent_ready(settings: Settings, timeout: float = 5.0) -> bool:

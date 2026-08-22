@@ -30,7 +30,26 @@ def run_gui(settings: Settings, start_minimized: bool = False) -> int:
     else:
         agent_handle = start_agent_in_background(settings)
         if not wait_for_agent_ready(settings, timeout=5.0):
-            _log.warning("Agent did not become ready in time; GUI will start in a disconnected state")
+            # The 0.5s check above isn't airtight: two instances launched
+            # together (e.g. the installer's autostart entry racing a
+            # manual launch right after login) can both see "nothing
+            # running yet" and both try to bind. Whichever loses gets
+            # here with agent_handle.error set (most likely "address
+            # already in use") -- check once more for a winner before
+            # giving up, instead of sitting disconnected forever with a
+            # perfectly good agent already running right next to it.
+            if agent_handle.error is not None:
+                _log.warning("This instance's agent failed to start: %s", agent_handle.error)
+            if wait_for_agent_ready(settings, timeout=2.0):
+                _log.info("Another instance's agent is up; connecting to it instead")
+                agent_handle.stop()
+                agent_handle = None
+            else:
+                _log.warning(
+                    "Agent did not become ready in time; GUI will start in a disconnected state. "
+                    "Logs: %s",
+                    settings.data.resolved_log_dir(),
+                )
 
     app = QApplication.instance() or QApplication(sys.argv)
     app.setStyleSheet(DARK_STYLESHEET)
