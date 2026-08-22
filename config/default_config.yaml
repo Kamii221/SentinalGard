@@ -42,3 +42,6 @@ monitoring:
   enabled: true
   process_poll_interval_seconds: 2.0
   process_hash_max_bytes: 25000000
+  file_hash_max_bytes: 25000000
+  file_entropy_sample_bytes: 1000000
+  file_watch_paths: null

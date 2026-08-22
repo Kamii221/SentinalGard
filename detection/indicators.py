@@ -9,11 +9,11 @@ see detection/url_analysis.py for how these are combined.
 from __future__ import annotations
 
 import ipaddress
-import math
-from collections import Counter
 from dataclasses import dataclass
 from typing import Callable
 from urllib.parse import ParseResult, parse_qsl, urlparse
+
+from detection.entropy import shannon_entropy
 
 _SUSPICIOUS_TLDS = frozenset(
     {
@@ -54,14 +54,6 @@ IndicatorFn = Callable[[str, ParseResult, str], "Indicator | None"]
 def _tld(hostname: str) -> str:
     parts = hostname.rstrip(".").split(".")
     return parts[-1] if parts else ""
-
-
-def _shannon_entropy(s: str) -> float:
-    if not s:
-        return 0.0
-    counts = Counter(s)
-    length = len(s)
-    return -sum((n / length) * math.log2(n / length) for n in counts.values())
 
 
 def check_ip_host(url: str, parsed: ParseResult, hostname: str) -> Indicator | None:
@@ -165,7 +157,7 @@ def check_high_entropy_domain(url: str, parsed: ParseResult, hostname: str) -> I
     if len(labels) < 2:
         return None
     primary = labels[-2]
-    if len(primary) >= 12 and _shannon_entropy(primary) >= 3.6:
+    if len(primary) >= 12 and shannon_entropy(primary) >= 3.6:
         return Indicator(
             15,
             f"Primary domain label looks algorithmically generated ('{primary}': high character "

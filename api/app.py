@@ -20,6 +20,7 @@ from api.routes import websites as websites_routes
 from api.security import TokenStore
 from config.settings import Settings
 from database.engine import create_session_factory, init_db
+from monitors.file_monitor import FileMonitor
 from monitors.process_monitor import ProcessMonitor
 
 _log = get_logger("api")
@@ -34,15 +35,21 @@ def create_app(settings: Settings) -> FastAPI:
     token_store.load_or_create()
 
     process_monitor: ProcessMonitor | None = None
+    file_monitor: FileMonitor | None = None
     if settings.monitoring.enabled:
         process_monitor = ProcessMonitor(session_factory, settings.monitoring, settings.risk)
+        file_monitor = FileMonitor(session_factory, settings.monitoring, settings.risk)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         _log.info("SentinelGuard agent starting on %s:%d", settings.api.host, settings.api.port)
         if process_monitor is not None:
             process_monitor.start()
+        if file_monitor is not None:
+            file_monitor.start()
         yield
+        if file_monitor is not None:
+            file_monitor.stop()
         if process_monitor is not None:
             process_monitor.stop()
         _log.info("SentinelGuard agent shutting down")
@@ -63,6 +70,7 @@ def create_app(settings: Settings) -> FastAPI:
     app.state.token_store = token_store
     app.state.started_monotonic = time.monotonic()
     app.state.process_monitor = process_monitor
+    app.state.file_monitor = file_monitor
 
     app.add_middleware(LoopbackOnlyMiddleware)
 
