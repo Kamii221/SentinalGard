@@ -10,9 +10,10 @@ Allow Once / Always Allow / Always Block controls through a desktop GUI.
 Everything runs on `127.0.0.1` and stores events in a local SQLite
 database. Nothing is uploaded anywhere by default.
 
-> **Status:** Phase 3 of 13 complete (project structure, configuration,
+> **Status:** Phase 4 of 13 complete (project structure, configuration,
 > database schema, logging, local FastAPI agent + authentication,
-> PySide6 GUI + dashboard). See "Build Order" below for what's next.
+> PySide6 GUI + dashboard, Chrome/Edge/Firefox URL-monitoring
+> extensions). See "Build Order" below for what's next.
 
 ## Architecture
 
@@ -127,8 +128,36 @@ agent as the single writer to the database.
   so an unauthenticated caller can't lock out the real owner. Every
   admin action is written to both the log file and the `events` table.
 
-Browser extensions (Phase 4) and the GUI (Phase 3) will use this same
-token to talk to the agent; no data leaves 127.0.0.1.
+Browser extensions and the GUI use this same token to talk to the
+agent; no data leaves 127.0.0.1.
+
+### Browser extensions (Phase 4)
+
+Chrome, Edge, and Firefox WebExtensions live in `browser_extensions/`
+— see `browser_extensions/README.md` for how to load them and pair
+them with the agent's token (a one-time manual copy-paste, since
+extensions can't read files on disk). Each watches top-level page
+navigations, sends only the URL to `POST /api/v1/websites/check`, and
+redirects to a blocked page if the agent says so. The popup and
+blocked page offer Allow Once / Block / Always Allow / Always Block.
+
+The agent gained three endpoints to support this:
+
+* `POST /api/v1/websites/check` — logs the navigation and returns a
+  decision. The decision logic itself is intentionally basic for
+  now (exact-domain match against `allowlist`/`blocklist`, default
+  "allow, no detection") — Phase 5's URL detection engine replaces
+  that internal logic without changing this contract.
+* `GET /api/v1/websites/lookup?url=...` — same decision logic, used
+  by the popup for display; doesn't log a `Website` row.
+* `POST /api/v1/websites/decision` — records a manual Allow Once /
+  Always Allow / Always Block choice, updating the `allowlist`/
+  `blocklist` tables (allow-once entries expire after 1 hour).
+
+The domain used for every decision is always derived server-side from
+the validated URL (`urlparse(url).hostname`) rather than trusted from
+a client-supplied field, so a request can't send mismatched URL/domain
+data.
 
 ## Testing
 
@@ -164,7 +193,7 @@ reduced-functionality fallback when not running elevated.
 1. ✅ Project structure + configuration + SQLite + logging
 2. ✅ FastAPI localhost agent + authentication
 3. ✅ PySide6 GUI + dashboard
-4. Chrome/Edge/Firefox URL-monitoring extensions
+4. ✅ Chrome/Edge/Firefox URL-monitoring extensions
 5. URL detection + allow/block engine
 6. Process monitoring
 7. File monitoring + hashing + YARA

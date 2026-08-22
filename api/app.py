@@ -6,6 +6,7 @@ import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -15,6 +16,7 @@ from api.middleware import LoopbackOnlyMiddleware
 from api.routes import auth as auth_routes
 from api.routes import health as health_routes
 from api.routes import status as status_routes
+from api.routes import websites as websites_routes
 from api.security import TokenStore
 from config.settings import Settings
 from database.engine import create_session_factory, init_db
@@ -57,10 +59,15 @@ def create_app(settings: Settings) -> FastAPI:
     app.include_router(health_routes.router, prefix="/api/v1")
     app.include_router(status_routes.router, prefix="/api/v1")
     app.include_router(auth_routes.router, prefix="/api/v1")
+    app.include_router(websites_routes.router, prefix="/api/v1")
 
     @app.exception_handler(RequestValidationError)
     async def _validation_error_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
-        return JSONResponse(status_code=422, content={"detail": exc.errors()})
+        # exc.errors() can embed the raw exception object (e.g. under
+        # ctx.error, from a field_validator raising ValueError), which the
+        # stdlib json module can't serialize — jsonable_encoder handles it
+        # the same way FastAPI's own default handler does.
+        return JSONResponse(status_code=422, content={"detail": jsonable_encoder(exc.errors())})
 
     @app.exception_handler(StarletteHTTPException)
     async def _http_exception_handler(_: Request, exc: StarletteHTTPException) -> JSONResponse:
