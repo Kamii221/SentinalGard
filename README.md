@@ -145,6 +145,28 @@ leaving you nowhere to look. A windowed build has no console for an
 uncaught thread exception to print to, so before this, a real startup
 failure was completely invisible.
 
+**A second, distinct cause of the same symptom, found from a real
+Windows log:** the agent can bind the port and every monitor can start
+cleanly — no exception, nothing in `AgentHandle.error` — and the
+dashboard still times out on every single request forever. `netstat`
+showed the port genuinely `LISTENING`; `curl -v` showed the TCP
+connection succeed and the request go out, then just hang with no
+response ever coming back. That pointed at `api/middleware.py`'s
+`LoopbackOnlyMiddleware`, which subclassed Starlette's
+`BaseHTTPMiddleware` — a class with long-standing, well-documented
+hangs when combined with real socket I/O under asyncio's default
+Windows event loop (`ProactorEventLoop`): the request is received, but
+the wrapped response never gets sent. Every test in this repo passed
+throughout, because `TestClient` talks to the ASGI app in-process over
+`httpx.ASGITransport` and never touches a real socket or the platform
+event loop — the one path that actually triggers this. Rewritten as a
+plain ASGI callable (`__call__(scope, receive, send)`), which has none
+of `BaseHTTPMiddleware`'s response-wrapping machinery. Live-verified
+correct (fast pass-through and fast 403-rejection, both over a real
+socket) on Linux, where the bug doesn't reproduce in the first place
+(different default event loop) — the real test is on Windows, which is
+where a user actually hit this.
+
 The small shield icon in the window titlebar, taskbar, and system tray
 (`gui/icon.py`) is drawn programmatically rather than loaded from a
 designed asset — there's no bundled graphic in the repo. The same
