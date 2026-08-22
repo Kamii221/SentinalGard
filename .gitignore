@@ -26,6 +26,9 @@ htmlcov/
 build/
 dist/
 *.spec
+# ...except our own hand-authored build spec, which is source, not
+# PyInstaller-generated output.
+!/sentinelguard.spec
 
 # Editors / OS
 .vscode/

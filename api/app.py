@@ -27,6 +27,7 @@ from monitors.log_monitor import LogMonitor
 from monitors.network_monitor import NetworkMonitor
 from monitors.persistence_monitor import PersistenceMonitor
 from monitors.process_monitor import ProcessMonitor
+from monitors.retention_monitor import RetentionMonitor
 
 _log = get_logger("api")
 
@@ -45,6 +46,7 @@ def create_app(settings: Settings) -> FastAPI:
     persistence_monitor: PersistenceMonitor | None = None
     log_monitor: LogMonitor | None = None
     correlation_monitor: CorrelationMonitor | None = None
+    retention_monitor: RetentionMonitor | None = None
     if settings.monitoring.enabled:
         process_monitor = ProcessMonitor(session_factory, settings.monitoring, settings.risk)
         file_monitor = FileMonitor(session_factory, settings.monitoring, settings.risk)
@@ -52,6 +54,7 @@ def create_app(settings: Settings) -> FastAPI:
         persistence_monitor = PersistenceMonitor(session_factory, settings.monitoring, settings.risk)
         log_monitor = LogMonitor(session_factory, settings.monitoring, settings.risk)
         correlation_monitor = CorrelationMonitor(session_factory, settings.monitoring, settings.risk)
+        retention_monitor = RetentionMonitor(session_factory, settings.monitoring, settings.retention)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -68,7 +71,11 @@ def create_app(settings: Settings) -> FastAPI:
             log_monitor.start()
         if correlation_monitor is not None:
             correlation_monitor.start()
+        if retention_monitor is not None:
+            retention_monitor.start()
         yield
+        if retention_monitor is not None:
+            retention_monitor.stop()
         if correlation_monitor is not None:
             correlation_monitor.stop()
         if log_monitor is not None:
@@ -104,6 +111,7 @@ def create_app(settings: Settings) -> FastAPI:
     app.state.persistence_monitor = persistence_monitor
     app.state.log_monitor = log_monitor
     app.state.correlation_monitor = correlation_monitor
+    app.state.retention_monitor = retention_monitor
 
     app.add_middleware(LoopbackOnlyMiddleware)
 

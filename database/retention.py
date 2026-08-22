@@ -1,8 +1,7 @@
 """Retention pruning so the local database does not grow indefinitely.
 
-This module only defines the pruning operation itself; scheduling it
-periodically is wired up by the background worker introduced with the
-FastAPI agent (Phase 2+).
+This module defines the pruning operation itself; it's scheduled
+periodically by monitors/retention_monitor.py (Phase 13).
 """
 
 from __future__ import annotations
