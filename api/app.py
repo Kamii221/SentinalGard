@@ -21,6 +21,7 @@ from api.security import TokenStore
 from config.settings import Settings
 from database.engine import create_session_factory, init_db
 from monitors.file_monitor import FileMonitor
+from monitors.log_monitor import LogMonitor
 from monitors.network_monitor import NetworkMonitor
 from monitors.persistence_monitor import PersistenceMonitor
 from monitors.process_monitor import ProcessMonitor
@@ -40,11 +41,13 @@ def create_app(settings: Settings) -> FastAPI:
     file_monitor: FileMonitor | None = None
     network_monitor: NetworkMonitor | None = None
     persistence_monitor: PersistenceMonitor | None = None
+    log_monitor: LogMonitor | None = None
     if settings.monitoring.enabled:
         process_monitor = ProcessMonitor(session_factory, settings.monitoring, settings.risk)
         file_monitor = FileMonitor(session_factory, settings.monitoring, settings.risk)
         network_monitor = NetworkMonitor(session_factory, settings.monitoring, settings.risk)
         persistence_monitor = PersistenceMonitor(session_factory, settings.monitoring, settings.risk)
+        log_monitor = LogMonitor(session_factory, settings.monitoring, settings.risk)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -57,7 +60,11 @@ def create_app(settings: Settings) -> FastAPI:
             network_monitor.start()
         if persistence_monitor is not None:
             persistence_monitor.start()
+        if log_monitor is not None:
+            log_monitor.start()
         yield
+        if log_monitor is not None:
+            log_monitor.stop()
         if persistence_monitor is not None:
             persistence_monitor.stop()
         if network_monitor is not None:
@@ -87,6 +94,7 @@ def create_app(settings: Settings) -> FastAPI:
     app.state.file_monitor = file_monitor
     app.state.network_monitor = network_monitor
     app.state.persistence_monitor = persistence_monitor
+    app.state.log_monitor = log_monitor
 
     app.add_middleware(LoopbackOnlyMiddleware)
 

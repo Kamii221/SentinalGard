@@ -48,3 +48,4 @@ monitoring:
   network_poll_interval_seconds: 3.0
   network_reverse_dns_timeout_seconds: 1.5
   persistence_poll_interval_seconds: 30.0
+  log_poll_interval_seconds: 15.0
