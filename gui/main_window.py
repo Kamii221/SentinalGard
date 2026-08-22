@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 
 from config.settings import Settings
 from gui.api_client import AgentClient
+from gui.icon import build_app_icon
 from gui.pages.dashboard import DashboardPage
 from gui.widgets import PlaceholderPage
 
@@ -48,6 +49,7 @@ class MainWindow(QMainWindow):
         self._minimize_to_tray = minimize_to_tray
 
         self.setWindowTitle("SentinelGuard")
+        self.setWindowIcon(build_app_icon())
         self.resize(1100, 700)
 
         self._sidebar = QListWidget()
@@ -59,7 +61,7 @@ class MainWindow(QMainWindow):
         for name, note in _NAV_SECTIONS:
             self._sidebar.addItem(QListWidgetItem(name))
             if name == "Dashboard":
-                self._stack.addWidget(DashboardPage(self._client))
+                self._stack.addWidget(DashboardPage(self._client, settings.data.resolved_log_dir()))
             else:
                 self._stack.addWidget(PlaceholderPage(name, note or ""))
 

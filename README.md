@@ -58,6 +58,7 @@ rules/                   YAML detection rules (edited without code changes)
 yara/                    YARA rules
 config/                  settings loader + default_config.yaml
 installer/               Inno Setup script for the Windows installer
+assets/                  icon.ico (see scripts/generate_icon.py)
 tests/                   unit tests
 main.py                  entrypoint
 ```
@@ -125,6 +126,32 @@ platform where a tray is available. If an agent is already running on
 the configured port — e.g. the autostart entry beat a manual launch to
 it — the GUI detects that and connects to it instead of trying to bind
 the port again.
+
+**If the dashboard still says "Agent unreachable":** two things had to
+be true at once for that to happen even after the fix above — the
+initial "is one already running?" check has a narrow window where two
+instances launched together (autostart racing a manual launch right
+after login) can both see nothing running yet and both try to bind;
+`run_gui` now rechecks once more before giving up, so this only shows
+persistently when the agent's startup failed for a different reason
+entirely. Two things make that diagnosable now, where before it was
+silent: `AgentHandle.error` captures whatever killed the agent's
+background thread — including the specific case that used to slip
+past a plain `except Exception`, since uvicorn signals "the port is
+taken" via `sys.exit()`, which raises `SystemExit`, not a normal
+exception — and gets logged; and the banner itself now names the log
+directory (`⚠ Agent unreachable — see logs in <path>`) instead of
+leaving you nowhere to look. A windowed build has no console for an
+uncaught thread exception to print to, so before this, a real startup
+failure was completely invisible.
+
+The small shield icon in the window titlebar, taskbar, and system tray
+(`gui/icon.py`) is drawn programmatically rather than loaded from a
+designed asset — there's no bundled graphic in the repo. The same
+shape is baked into `assets/icon.ico` (via `scripts/generate_icon.py`,
+which needs Pillow — not a runtime dependency, only that one regen
+script) for the compiled `.exe`'s own icon and the installer's icon;
+regenerate it after changing the design in `gui/icon.py`.
 
 ### The local agent (Phase 2)
 

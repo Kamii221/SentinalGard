@@ -84,6 +84,45 @@ def test_close_event_accepted_without_tray(qapp: QApplication, tmp_path: Path) -
     assert event.isAccepted() is True
 
 
+def test_run_gui_recovers_when_it_loses_a_startup_race(
+    monkeypatch: pytest.MonkeyPatch, qapp: QApplication, tmp_path: Path
+) -> None:
+    """Deterministic version of the race two instances launched together
+    can hit: this one's own agent fails to bind (port already taken by
+    the other instance), but a recheck finds that other instance's
+    agent came up in the meantime -- run_gui must stop its own failed
+    handle and fall back to being a plain client, not sit disconnected
+    forever next to a perfectly good agent."""
+    settings = _settings_with_port(tmp_path, 8789)
+
+    calls = {"wait": 0}
+
+    def fake_wait(_settings: object, timeout: float) -> bool:
+        calls["wait"] += 1
+        # 1: initial "is one already running" check -> no.
+        # 2: post-start readiness wait -> our own start failed.
+        # 3: race recheck -> the other instance is up now.
+        return calls["wait"] >= 3
+
+    class FakeHandle:
+        def __init__(self) -> None:
+            self.error = OSError("address already in use")
+            self.stopped = False
+
+        def stop(self, timeout: float = 5.0) -> None:
+            self.stopped = True
+
+    fake_handle = FakeHandle()
+    monkeypatch.setattr("gui.app.wait_for_agent_ready", fake_wait)
+    monkeypatch.setattr("gui.app.start_agent_in_background", lambda _settings: fake_handle)
+
+    QTimer.singleShot(200, qapp.quit)
+    run_gui(settings)
+
+    assert calls["wait"] == 3
+    assert fake_handle.stopped is True
+
+
 def test_run_gui_connects_to_an_already_running_agent_instead_of_rebinding(
     qapp: QApplication, tmp_path: Path
 ) -> None:
