@@ -1,0 +1,61 @@
+name: Build Windows installer
+
+# Builds the PyInstaller bundle (sentinelguard.spec) and wraps it in an
+# Inno Setup installer (installer/sentinelguard.iss). Both steps need
+# real Windows -- Inno Setup's compiler is a Windows-only tool, and this
+# is also the only place the pywin32-backed code (persistence/event-log
+# monitoring) actually gets imported and byte-compiled for real, since
+# pywin32 isn't installed at all on the Linux dev environment this repo
+# is otherwise developed and tested in.
+#
+# Trigger manually from the Actions tab (Run workflow), or push a tag
+# like "v1.2.3" to build and version a release installer.
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run the test suite
+        run: pytest tests/ -q
+
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-dev${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build the PyInstaller bundle
+        run: pyinstaller sentinelguard.spec
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Compile the installer
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=${{ steps.version.outputs.version }} installer\sentinelguard.iss
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SentinelGuard-Setup-${{ steps.version.outputs.version }}
+          path: installer/output/*.exe
