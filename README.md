@@ -10,12 +10,12 @@ Allow Once / Always Allow / Always Block controls through a desktop GUI.
 Everything runs on `127.0.0.1` and stores events in a local SQLite
 database. Nothing is uploaded anywhere by default.
 
-> **Status:** Phase 7 of 13 complete (project structure, configuration,
+> **Status:** Phase 8 of 13 complete (project structure, configuration,
 > database schema, logging, local FastAPI agent + authentication,
 > PySide6 GUI + dashboard, Chrome/Edge/Firefox URL-monitoring
 > extensions, URL detection + allow/block engine, process monitoring,
-> file monitoring + hashing + YARA). See "Build Order" below for
-> what's next.
+> file monitoring + hashing + YARA, network monitoring). See "Build
+> Order" below for what's next.
 
 ## Architecture
 
@@ -286,6 +286,47 @@ utilities — deduped out of Phase 5's URL indicators and Phase 6's
 process monitor respectively, since file monitoring needed the same
 logic a third time.
 
+### Network monitoring (Phase 8)
+
+`monitors/network_monitor.py` polls `psutil.net_connections()` on a
+background thread at a configurable interval
+(`monitoring.network_poll_interval_seconds`, default 3s) and diffs
+each snapshot against the previous one — same pattern as process
+monitoring, since there's no lightweight OS-level connection-event API
+without WFP (Windows Filtering Platform) or ETW that stays within the
+dependency budget. Only **new** established outbound connections are
+recorded — unlike process termination, "a connection closed" isn't a
+meaningful security signal on its own and would be pure noise at the
+volume real traffic generates. SentinelGuard's own loopback traffic
+(the GUI/extensions talking to the agent on 127.0.0.1) is filtered out
+entirely so it never pollutes this table.
+
+**DNS activity, "where available"**: `psutil` has no visibility into
+DNS queries themselves — genuine visibility needs ETW (Windows) or
+packet capture, both out of scope for a dependency-light v1 (Phase 10's
+log analyzer is the right place for ETW-based DNS visibility later).
+As a practical approximation, each new connection's destination IP
+gets a best-effort, cached, timeout-bounded reverse DNS lookup
+(`monitoring.network_reverse_dns_timeout_seconds`) to attach a
+human-readable domain for correlation/display. This is *not* the same
+as seeing the actual DNS query, and a large fraction of legitimate
+destinations (CDNs, cloud providers) have no PTR record at all — so
+"no reverse DNS" is deliberately never scored as suspicious; doing so
+would be pure noise, exactly the kind of weak heuristic the spec warns
+against overclaiming from.
+
+`detection/network_analysis.py` scores each new connection: a LOLBin
+process (from the same list used in process monitoring) making an
+outbound connection is unusual and strongly weighted, a small curated
+set of ports historically associated with malware C2 defaults (e.g.
+Metasploit's 4444) adds a moderate signal, and a known-malicious-IP
+match against the *same* `blocklist` table used for domains/hashes
+(`entry_type="ip"`) short-circuits straight to Critical.
+
+Listing all users' connections can require Administrator/root
+privileges on some platforms (notably macOS); this degrades to "no
+data" rather than crashing if access is denied.
+
 ## Testing
 
 ```bash
@@ -324,7 +365,7 @@ reduced-functionality fallback when not running elevated.
 5. ✅ URL detection + allow/block engine
 6. ✅ Process monitoring
 7. ✅ File monitoring + hashing + YARA
-8. Network monitoring
+8. ✅ Network monitoring
 9. Persistence monitoring
 10. Windows log analyzer
 11. Behavior correlation + risk scoring

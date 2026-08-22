@@ -1,4 +1,4 @@
-"""URL/file/behavior detection engine.
+"""URL/file/network/behavior detection engine.
 
 * detection/risk.py -- risk score -> severity band mapping (Phase 4).
 * detection/entropy.py -- shared Shannon entropy helper (Phase 5/7).
@@ -12,9 +12,13 @@
   (Phase 7).
 * detection/yara_engine.py -- compiles and runs YARA rules from
   yara/, degrading gracefully if unavailable (Phase 7).
+* detection/network_analysis.py -- local network-connection
+  heuristics: LOLBin network activity, suspicious C2 ports,
+  known-malicious-IP lookup (Phase 8).
 """
 
 from detection.file_analysis import FileAnalysis, analyze_file
+from detection.network_analysis import NetworkAnalysis, analyze_connection
 from detection.reputation import NullReputationProvider, ReputationProvider, get_reputation_provider
 from detection.risk import severity_for_risk
 from detection.url_analysis import UrlAnalysis, analyze_url
@@ -26,6 +30,8 @@ __all__ = [
     "UrlAnalysis",
     "analyze_file",
     "FileAnalysis",
+    "analyze_connection",
+    "NetworkAnalysis",
     "ReputationProvider",
     "NullReputationProvider",
     "get_reputation_provider",
