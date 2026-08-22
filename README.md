@@ -115,6 +115,17 @@ The GUI never opens the SQLite file directly — it's an HTTP client of
 the agent, same as the browser extensions will be, which keeps the
 agent as the single writer to the database.
 
+`--gui --minimized` skips showing the window and starts hidden in the
+system tray instead — monitoring still starts immediately, it's just
+the window that's not shown until you click the tray icon. This is
+what the Windows installer's autostart entry uses (see "Windows
+installer" below); closing the window (rather than choosing Exit from
+the tray menu) hides it back to the tray instead of quitting, on any
+platform where a tray is available. If an agent is already running on
+the configured port — e.g. the autostart entry beat a manual launch to
+it — the GUI detects that and connects to it instead of trying to bind
+the port again.
+
 ### The local agent (Phase 2)
 
 `python main.py --serve` starts a FastAPI service on
@@ -676,6 +687,21 @@ that asks before deleting local data (the SQLite database, logs, and
 any quarantined files under `%APPDATA%\SentinelGuard`) rather than
 either silently destroying alert history or silently leaving it behind
 forever.
+
+**It runs in the background from the moment it's installed.** A
+"Start SentinelGuard automatically when Windows starts" task, checked
+by default, adds a per-user autostart entry
+(`HKCU\...\Run`) that launches `SentinelGuard.exe --gui --minimized` on
+login: the agent and every monitor start immediately, and the app comes
+up hidden in the system tray rather than popping a window. Click the
+tray icon (or "Open Dashboard" from its right-click menu) any time to
+see the dashboard; closing that window with the titlebar X hides it
+back to the tray instead of exiting — monitoring keeps running either
+way. "Exit" from the tray menu is the only thing that actually stops
+it. If the GUI is launched again while an agent is already running
+(the tray autostart racing a manual launch, or a second launch in
+general), it detects the existing agent and connects to it instead of
+trying to bind the port a second time.
 
 Building it requires a real Windows machine (Inno Setup's compiler,
 `ISCC.exe`, doesn't run on Linux):
