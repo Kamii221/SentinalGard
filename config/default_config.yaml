@@ -1,0 +1,39 @@
+# SentinelGuard default configuration.
+# Any value here can be overridden by a user config file passed via
+# --config, or by a file at %APPDATA%/SentinelGuard/config.yaml
+# (~/.sentinelguard/config.yaml on non-Windows).
+
+app:
+  name: SentinelGuard
+  version: "0.1.0"
+  environment: production
+
+data:
+  # null => resolved automatically (see config/settings.py:default_data_dir)
+  data_dir: null
+  db_filename: sentinelguard.db
+  log_dir: null
+
+logging:
+  level: INFO
+  max_bytes: 5242880
+  backup_count: 5
+  console: true
+
+api:
+  host: 127.0.0.1
+  port: 8765
+
+retention:
+  events_days: 30
+  alerts_days: 90
+  network_connections_days: 14
+  processes_days: 14
+  files_days: 30
+  incidents_days: 180
+
+risk:
+  informational_max: 20
+  low_max: 40
+  medium_max: 60
+  high_max: 80

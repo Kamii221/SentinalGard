@@ -1,0 +1,166 @@
+"""Typed configuration loading for SentinelGuard.
+
+Configuration is a YAML file validated through Pydantic models. The
+packaged ``default_config.yaml`` supplies defaults; an optional user
+config file (or explicit path) is deep-merged on top of it.
+"""
+
+from __future__ import annotations
+
+import os
+from functools import lru_cache
+from pathlib import Path
+from typing import Any, Optional
+
+import yaml
+from pydantic import BaseModel, Field, field_validator
+
+_PACKAGE_DIR = Path(__file__).resolve().parent
+_DEFAULT_CONFIG_PATH = _PACKAGE_DIR / "default_config.yaml"
+
+
+def default_data_dir() -> Path:
+    """Return the platform-appropriate default data directory.
+
+    Windows: %APPDATA%\\SentinelGuard
+    Other platforms (dev/test): ~/.sentinelguard
+    """
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        return Path(appdata) / "SentinelGuard"
+    return Path.home() / ".sentinelguard"
+
+
+class AppConfig(BaseModel):
+    name: str = "SentinelGuard"
+    version: str = "0.1.0"
+    environment: str = "production"
+
+
+class DataConfig(BaseModel):
+    data_dir: Optional[Path] = None
+    db_filename: str = "sentinelguard.db"
+    log_dir: Optional[Path] = None
+
+    def resolved_data_dir(self) -> Path:
+        return self.data_dir or default_data_dir()
+
+    def resolved_log_dir(self) -> Path:
+        return self.log_dir or (self.resolved_data_dir() / "logs")
+
+    def resolved_db_path(self) -> Path:
+        return self.resolved_data_dir() / self.db_filename
+
+
+class LoggingConfig(BaseModel):
+    level: str = "INFO"
+    max_bytes: int = Field(default=5_242_880, gt=0)
+    backup_count: int = Field(default=5, ge=0)
+    console: bool = True
+
+    @field_validator("level")
+    @classmethod
+    def _valid_level(cls, v: str) -> str:
+        allowed = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+        upper = v.upper()
+        if upper not in allowed:
+            raise ValueError(f"logging.level must be one of {sorted(allowed)}")
+        return upper
+
+
+class ApiConfig(BaseModel):
+    host: str = "127.0.0.1"
+    port: int = Field(default=8765, ge=1, le=65535)
+
+    @field_validator("host")
+    @classmethod
+    def _localhost_only(cls, v: str) -> str:
+        if v not in ("127.0.0.1", "localhost", "::1"):
+            raise ValueError(
+                "api.host must be a loopback address; SentinelGuard's agent "
+                "must never be exposed to the LAN"
+            )
+        return v
+
+
+class RetentionConfig(BaseModel):
+    events_days: int = Field(default=30, ge=1)
+    alerts_days: int = Field(default=90, ge=1)
+    network_connections_days: int = Field(default=14, ge=1)
+    processes_days: int = Field(default=14, ge=1)
+    files_days: int = Field(default=30, ge=1)
+    incidents_days: int = Field(default=180, ge=1)
+
+
+class RiskConfig(BaseModel):
+    informational_max: int = Field(default=20, ge=0, le=100)
+    low_max: int = Field(default=40, ge=0, le=100)
+    medium_max: int = Field(default=60, ge=0, le=100)
+    high_max: int = Field(default=80, ge=0, le=100)
+
+    @field_validator("high_max")
+    @classmethod
+    def _ordered(cls, v: int, info: Any) -> int:
+        data = info.data
+        thresholds = [
+            data.get("informational_max"),
+            data.get("low_max"),
+            data.get("medium_max"),
+            v,
+        ]
+        if any(t is None for t in thresholds):
+            return v
+        if thresholds != sorted(thresholds):
+            raise ValueError(
+                "risk thresholds must be strictly increasing: "
+                "informational_max < low_max < medium_max < high_max"
+            )
+        return v
+
+
+class Settings(BaseModel):
+    app: AppConfig = Field(default_factory=AppConfig)
+    data: DataConfig = Field(default_factory=DataConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    api: ApiConfig = Field(default_factory=ApiConfig)
+    retention: RetentionConfig = Field(default_factory=RetentionConfig)
+    risk: RiskConfig = Field(default_factory=RiskConfig)
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    merged = dict(base)
+    for key, value in override.items():
+        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _load_yaml(path: Path) -> dict:
+    with path.open("r", encoding="utf-8") as fh:
+        data = yaml.safe_load(fh)
+    return data or {}
+
+
+def load_settings(config_path: Optional[Path] = None) -> Settings:
+    """Load settings from the packaged defaults, merged with an optional
+    user config file.
+
+    Resolution order for the user config file when ``config_path`` is not
+    given: ``%APPDATA%/SentinelGuard/config.yaml`` (or
+    ``~/.sentinelguard/config.yaml``) if it exists, otherwise defaults only.
+    """
+    merged = _load_yaml(_DEFAULT_CONFIG_PATH)
+
+    user_path = config_path or (default_data_dir() / "config.yaml")
+    if user_path.exists():
+        merged = _deep_merge(merged, _load_yaml(user_path))
+
+    return Settings.model_validate(merged)
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    """Cached process-wide settings singleton."""
+    return load_settings()

@@ -1,0 +1,25 @@
+# --- Phase 1 (config, database, logging) ---
+pydantic>=2.6,<3
+PyYAML>=6.0,<7
+SQLAlchemy>=2.0,<3
+
+# --- Phase 2 (local FastAPI agent) ---
+fastapi>=0.110,<1
+uvicorn[standard]>=0.29,<1
+
+# --- Phase 3 (desktop GUI) ---
+PySide6>=6.6,<7
+
+# --- Phase 6-9 (process/file/network/persistence monitoring) ---
+psutil>=5.9,<6
+watchdog>=4.0,<5
+
+# --- Phase 7 (YARA scanning) ---
+yara-python>=4.5,<5
+
+# --- Phase 10 (Windows event log analysis, Windows only) ---
+pywin32>=306; sys_platform == "win32"
+
+# --- Phase 13 (packaging & tests) ---
+pyinstaller>=6.5,<7
+pytest>=8.0,<9
