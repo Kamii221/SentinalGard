@@ -1,1 +1,1 @@
-"""PySide6 desktop GUI (implemented in Phase 3)."""
+"""PySide6 desktop GUI."""

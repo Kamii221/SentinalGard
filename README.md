@@ -10,9 +10,9 @@ Allow Once / Always Allow / Always Block controls through a desktop GUI.
 Everything runs on `127.0.0.1` and stores events in a local SQLite
 database. Nothing is uploaded anywhere by default.
 
-> **Status:** Phase 2 of 13 complete (project structure, configuration,
-> database schema, logging, local FastAPI agent + authentication). See
-> "Build Order" below for what's next.
+> **Status:** Phase 3 of 13 complete (project structure, configuration,
+> database schema, logging, local FastAPI agent + authentication,
+> PySide6 GUI + dashboard). See "Build Order" below for what's next.
 
 ## Architecture
 
@@ -75,7 +75,8 @@ pip install -r requirements.txt
 
 ```bash
 python main.py            # bootstrap only: config, logging, DB schema
-python main.py --serve    # also start the local agent on 127.0.0.1:8765
+python main.py --serve    # start the local agent on 127.0.0.1:8765 (foreground)
+python main.py --gui      # launch the desktop app (starts the agent in the background)
 ```
 
 Bootstrap loads configuration, sets up rotating file + console logging,
@@ -91,6 +92,22 @@ python main.py --config path\to\config.yaml
 ```
 
 Any subset of `config/default_config.yaml`'s keys can be overridden.
+
+### The desktop GUI (Phase 3)
+
+`python main.py --gui` starts the agent on a background thread and
+opens a dark-themed PySide6 window with the full sidebar from spec:
+Dashboard, Live Activity, Websites, Alerts, Processes, Network, Files,
+Persistence, Logs, Rules, Quarantine, Settings. Only **Dashboard** is
+implemented so far — it polls `GET /api/v1/status` every 3 seconds and
+shows the required tiles (websites scanned/blocked, threats detected,
+suspicious processes, network events, recent alerts, protection
+status). Every other section is a labeled placeholder naming the phase
+that implements it, so the navigation shell doesn't need rework later.
+
+The GUI never opens the SQLite file directly — it's an HTTP client of
+the agent, same as the browser extensions will be, which keeps the
+agent as the single writer to the database.
 
 ### The local agent (Phase 2)
 
@@ -146,7 +163,7 @@ reduced-functionality fallback when not running elevated.
 
 1. ✅ Project structure + configuration + SQLite + logging
 2. ✅ FastAPI localhost agent + authentication
-3. PySide6 GUI + dashboard
+3. ✅ PySide6 GUI + dashboard
 4. Chrome/Edge/Firefox URL-monitoring extensions
 5. URL detection + allow/block engine
 6. Process monitoring
