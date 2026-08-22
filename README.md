@@ -57,6 +57,7 @@ browser_extensions/      chrome/, edge/, firefox/ WebExtensions
 rules/                   YAML detection rules (edited without code changes)
 yara/                    YARA rules
 config/                  settings loader + default_config.yaml
+installer/               Inno Setup script for the Windows installer
 tests/                   unit tests
 main.py                  entrypoint
 ```
@@ -664,6 +665,39 @@ stopping in the correct reverse order) — but that only proves the
 themselves (registry/service/task persistence enumeration, Windows
 Event Log reading), which still need a real-Windows spot-check, same as
 their unpackaged counterparts.
+
+### Windows installer
+
+`installer/sentinelguard.iss` wraps the PyInstaller bundle above into a
+standard Windows installer using [Inno Setup](https://jrsoftware.org/isinfo.php)
+(free, Windows-only) — Program Files install, Start Menu + optional
+desktop shortcut launching `SentinelGuard.exe --gui`, and an uninstaller
+that asks before deleting local data (the SQLite database, logs, and
+any quarantined files under `%APPDATA%\SentinelGuard`) rather than
+either silently destroying alert history or silently leaving it behind
+forever.
+
+Building it requires a real Windows machine (Inno Setup's compiler,
+`ISCC.exe`, doesn't run on Linux):
+
+```powershell
+pip install -r requirements.txt
+pyinstaller sentinelguard.spec
+iscc installer\sentinelguard.iss
+# Output: installer\output\SentinelGuard-Setup-0.1.0.exe
+```
+
+Pass a specific version with `iscc /DMyAppVersion=1.2.3 installer\sentinelguard.iss`.
+
+**`.github/workflows/build-windows-installer.yml`** does this in CI on
+a `windows-latest` runner — the test suite, the PyInstaller build, and
+the Inno Setup compile all run for real on Windows there, which is also
+the only place the pywin32-backed monitors actually get imported (this
+repo's own dev environment doesn't have pywin32 installed at all, since
+`requirements.txt` marks it `sys_platform == "win32"`). Trigger it from
+the Actions tab (workflow_dispatch) for an ad-hoc build, or push a
+`v*` tag to build a versioned release installer; either way the
+finished `.exe` is uploaded as a workflow artifact.
 
 ## Testing
 
