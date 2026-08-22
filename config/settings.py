@@ -132,6 +132,10 @@ class MonitoringConfig(BaseModel):
     # None => auto-detect security-sensitive locations (Downloads,
     # Desktop, Temp, Startup, ...). Set explicitly to override/restrict.
     file_watch_paths: list[str] | None = None
+    network_poll_interval_seconds: float = Field(default=3.0, gt=0)
+    # Bounded wait for a single reverse-DNS lookup; results are cached
+    # by IP so the same destination is never looked up twice.
+    network_reverse_dns_timeout_seconds: float = Field(default=1.5, gt=0)
 
 
 class Settings(BaseModel):
