@@ -1,10 +1,13 @@
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import QTimer
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QApplication
 
 from agent.server import start_agent_in_background, wait_for_agent_ready
 from config.settings import load_settings
+from gui.app import run_gui
 from gui.main_window import MainWindow
 
 
@@ -55,5 +58,53 @@ def test_dashboard_reflects_live_agent_status(tmp_path: Path, qapp: QApplication
 
         assert "ACTIVE" in dashboard._status_label.text()
         assert dashboard._cards["websites_scanned"]._value_label.text() == "0"
+    finally:
+        handle.stop()
+
+
+def test_close_event_ignored_and_hides_window_when_minimized_to_tray(qapp: QApplication, tmp_path: Path) -> None:
+    settings = _settings_with_port(tmp_path, 8793)
+    window = MainWindow(settings, minimize_to_tray=True)
+    window.show()
+
+    event = QCloseEvent()
+    window.closeEvent(event)
+
+    assert event.isAccepted() is False
+    assert window.isVisible() is False
+
+
+def test_close_event_accepted_without_tray(qapp: QApplication, tmp_path: Path) -> None:
+    settings = _settings_with_port(tmp_path, 8792)
+    window = MainWindow(settings)  # minimize_to_tray defaults to False
+
+    event = QCloseEvent()
+    window.closeEvent(event)
+
+    assert event.isAccepted() is True
+
+
+def test_run_gui_connects_to_an_already_running_agent_instead_of_rebinding(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    """Regression test: the GUI used to unconditionally try to start its
+    own agent, which failed with "address already in use" (silently, on
+    a background thread) whenever one was already running -- e.g. a
+    second GUI launch, or the installer's autostart shortcut racing a
+    manual launch. run_gui must detect that and connect instead."""
+    settings = _settings_with_port(tmp_path, 8796)
+    handle = start_agent_in_background(settings)
+    try:
+        assert wait_for_agent_ready(settings, timeout=5.0)
+
+        # Let run_gui's event loop spin up and settle, then quit it --
+        # there's no window interaction to simulate here.
+        QTimer.singleShot(200, qapp.quit)
+        run_gui(settings)
+
+        # The agent run_gui connected to (but didn't start) must still be
+        # running: it must not have tried to rebind the port, and must
+        # not have stopped an agent it doesn't own.
+        assert wait_for_agent_ready(settings, timeout=1.0)
     finally:
         handle.stop()

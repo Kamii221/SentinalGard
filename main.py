@@ -37,10 +37,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Launch the desktop GUI (also starts the local agent in the background)",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--minimized",
+        action="store_true",
+        help=(
+            "With --gui, start hidden in the system tray instead of showing the "
+            "window. Used by the installer's 'launch at startup' shortcut so "
+            "monitoring begins automatically without popping a window on login."
+        ),
+    )
+    args = parser.parse_args(argv)
+    if args.minimized and not args.gui:
+        parser.error("--minimized requires --gui")
+    return args
 
 
-def bootstrap(config_path: Path | None = None, serve: bool = False, gui: bool = False) -> int:
+def bootstrap(config_path: Path | None = None, serve: bool = False, gui: bool = False, minimized: bool = False) -> int:
     settings = load_settings(config_path)
     setup_logging(settings)
     log = get_logger("main")
@@ -57,7 +69,7 @@ def bootstrap(config_path: Path | None = None, serve: bool = False, gui: bool = 
         # PySide6 to be installed.
         from gui.app import run_gui
 
-        return run_gui(settings)
+        return run_gui(settings, start_minimized=minimized)
 
     if serve:
         run_agent(settings)
@@ -71,7 +83,7 @@ def bootstrap(config_path: Path | None = None, serve: bool = False, gui: bool = 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    return bootstrap(args.config, args.serve, args.gui)
+    return bootstrap(args.config, args.serve, args.gui, args.minimized)
 
 
 if __name__ == "__main__":

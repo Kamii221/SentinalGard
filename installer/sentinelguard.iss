@@ -2,7 +2,9 @@
 ;
 ; Wraps the PyInstaller onedir build (dist/SentinelGuard/, produced by
 ; ../sentinelguard.spec) into a standard Windows installer: Program Files
-; install, Start Menu + optional desktop shortcut, and an uninstaller
+; install, Start Menu + optional desktop shortcut, an autostart entry
+; (checked by default) so it starts running in the background and
+; monitoring on login without a window popping up, and an uninstaller
 ; that asks before deleting local data.
 ;
 ; This script only runs through Inno Setup's compiler (ISCC.exe), which
@@ -54,6 +56,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"
+Name: "startup"; Description: "Start SentinelGuard automatically when Windows starts (runs in the background and keeps monitoring)"; GroupDescription: "Startup:"
 
 [Files]
 ; The PyInstaller onedir bundle -- the .exe plus its bundled Python
@@ -64,6 +67,14 @@ Source: "..\dist\SentinelGuard\*"; DestDir: "{app}"; Flags: recursesubdirs creat
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--gui"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--gui"; Tasks: desktopicon
+
+[Registry]
+; Per-user autostart: launches straight to the tray (--minimized) so
+; monitoring begins on login without popping a window. Tied to the
+; "startup" task, and Inno Setup removes the value automatically on
+; uninstall (uninsdeletevalue) regardless of whether the task ends up
+; checked or not.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "SentinelGuard"; ValueData: """{app}\{#MyAppExeName}"" --gui --minimized"; Flags: uninsdeletevalue; Tasks: startup
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Parameters: "--gui"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent unchecked

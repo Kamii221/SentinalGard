@@ -36,10 +36,16 @@ _NAV_SECTIONS: list[tuple[str, str | None]] = [
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, minimize_to_tray: bool = False) -> None:
         super().__init__()
         self._settings = settings
         self._client = AgentClient(settings)
+        # When a tray icon is available, closing the window (the titlebar
+        # X) should just hide it -- monitoring keeps running in the
+        # background and the dashboard reopens from the tray. Without a
+        # tray to fall back to, closing the window behaves normally and
+        # exits the app, since there'd be no other way to get it back.
+        self._minimize_to_tray = minimize_to_tray
 
         self.setWindowTitle("SentinelGuard")
         self.resize(1100, 700)
@@ -71,3 +77,10 @@ class MainWindow(QMainWindow):
         status_bar = QStatusBar()
         status_bar.showMessage(f"SentinelGuard v{settings.app.version}")
         self.setStatusBar(status_bar)
+
+    def closeEvent(self, event) -> None:
+        if self._minimize_to_tray:
+            event.ignore()
+            self.hide()
+        else:
+            super().closeEvent(event)

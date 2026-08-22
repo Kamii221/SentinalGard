@@ -37,6 +37,20 @@ def test_parse_args_rejects_serve_and_gui_together() -> None:
         main.parse_args(["--serve", "--gui"])
 
 
+def test_parse_args_minimized_with_gui() -> None:
+    args = main.parse_args(["--gui", "--minimized"])
+    assert args.gui is True
+    assert args.minimized is True
+
+
+def test_parse_args_rejects_minimized_without_gui() -> None:
+    # --minimized only means something as a GUI startup mode.
+    with pytest.raises(SystemExit):
+        main.parse_args(["--serve", "--minimized"])
+    with pytest.raises(SystemExit):
+        main.parse_args(["--minimized"])
+
+
 @pytest.fixture()
 def stub_settings(tmp_path: Path, monkeypatch):
     settings = load_settings()
@@ -71,8 +85,8 @@ def test_bootstrap_serve_runs_the_agent(stub_settings, monkeypatch) -> None:
 def test_bootstrap_gui_runs_the_gui_and_returns_its_exit_code(stub_settings, monkeypatch) -> None:
     calls = []
 
-    def _run_gui(settings):
-        calls.append(settings)
+    def _run_gui(settings, start_minimized=False):
+        calls.append((settings, start_minimized))
         return 7
 
     # bootstrap() imports gui.app lazily inside the function body, so the
@@ -82,14 +96,23 @@ def test_bootstrap_gui_runs_the_gui_and_returns_its_exit_code(stub_settings, mon
     result = main.bootstrap(gui=True)
 
     assert result == 7
-    assert calls == [stub_settings]
+    assert calls == [(stub_settings, False)]
+
+
+def test_bootstrap_gui_minimized_passes_start_minimized(stub_settings, monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr("gui.app.run_gui", lambda settings, start_minimized=False: calls.append(start_minimized))
+
+    main.bootstrap(gui=True, minimized=True)
+
+    assert calls == [True]
 
 
 def test_main_dispatches_parsed_args_to_bootstrap(monkeypatch) -> None:
     captured = {}
 
-    def _bootstrap(config_path, serve, gui):
-        captured["args"] = (config_path, serve, gui)
+    def _bootstrap(config_path, serve, gui, minimized):
+        captured["args"] = (config_path, serve, gui, minimized)
         return 0
 
     monkeypatch.setattr(main, "bootstrap", _bootstrap)
@@ -97,4 +120,4 @@ def test_main_dispatches_parsed_args_to_bootstrap(monkeypatch) -> None:
     result = main.main(["--serve"])
 
     assert result == 0
-    assert captured["args"] == (None, True, False)
+    assert captured["args"] == (None, True, False, False)
