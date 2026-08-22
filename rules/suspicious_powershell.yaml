@@ -1,0 +1,13 @@
+# Process/command-line rule (spec's own example format, unchanged).
+# Fires on process-creation events where the process name contains
+# "powershell.exe" AND the flattened event details contain at least
+# one of the listed indicators (command line, script text, etc.).
+name: Suspicious PowerShell
+severity: high
+conditions:
+  event_type: process_create
+  process: powershell.exe
+  indicators:
+    - encodedcommand
+    - downloadstring
+    - invoke-webrequest

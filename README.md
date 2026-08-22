@@ -10,13 +10,13 @@ Allow Once / Always Allow / Always Block controls through a desktop GUI.
 Everything runs on `127.0.0.1` and stores events in a local SQLite
 database. Nothing is uploaded anywhere by default.
 
-> **Status:** Phase 10 of 13 complete (project structure, configuration,
+> **Status:** Phase 11 of 13 complete (project structure, configuration,
 > database schema, logging, local FastAPI agent + authentication,
 > PySide6 GUI + dashboard, Chrome/Edge/Firefox URL-monitoring
 > extensions, URL detection + allow/block engine, process monitoring,
 > file monitoring + hashing + YARA, network monitoring, persistence
-> monitoring, Windows log analyzer). See "Build Order" below for
-> what's next.
+> monitoring, Windows log analyzer, behavior correlation + risk
+> scoring). See "Build Order" below for what's next.
 
 ## Architecture
 
@@ -431,6 +431,106 @@ Correlating these events with everything else — the spec's own
 created → persistence created ⇒ one incident" example — is Phase 11's
 job. This phase only classifies one event at a time.
 
+### Behavior correlation + risk scoring (Phase 11)
+
+This phase ties every prior monitor together, sitting entirely on top
+of the `events` table each of them already writes to — no monitor from
+Phases 6-10 needed to change. (One gap did need fixing: `POST
+/websites/check` previously only wrote to the `websites` table, never
+`events`, so URL activity was invisible to everything below. It now
+writes both.)
+
+**YAML rule engine** (`rules/`, loaded once at agent startup —
+picking up an edited rule currently requires restarting the agent).
+Two rule shapes share the directory, distinguished by which key is
+present:
+
+* **Condition rules** — the spec's own example format, unchanged:
+  ```yaml
+  name: Suspicious PowerShell
+  severity: high
+  conditions:
+    process: powershell.exe
+    indicators:
+      - encodedcommand
+      - downloadstring
+      - invoke-webrequest
+  ```
+  `event_type` (e.g. `process_create`, `file_created`,
+  `network_connection`, `website_check`, `persistence_new`) is how a
+  rule targets the spec's "process/command-line/file/network/URL/
+  persistence rule" types — one flexible schema instead of six
+  separate ones. `indicators` matches against every string value in
+  the event's `details` (command lines, script text, paths, URLs,
+  …), not just a summary field.
+* **Correlation scenarios** (the spec's "Event correlation" rule
+  type) — an ordered list of steps, each naming the event type(s) (and
+  optionally a process-name substring) that must occur, in order,
+  within a rolling window:
+  ```yaml
+  name: Office document spawns PowerShell, then reaches out and persists
+  severity: critical
+  window_minutes: 15
+  steps:
+    - event_types: [process_create]
+      process_contains: [winword.exe, excel.exe, outlook.exe]
+    - event_types: [process_create]
+      process_contains: [powershell.exe, pwsh.exe]
+    - event_types: [network_connection]
+    - event_types: [file_created]
+    - event_types: [persistence_new]
+  ```
+  This is the literal spec example. A match bundles every matched
+  event into **one** `Incident` row (not five separate alerts) plus
+  one `Alert` pointing at it.
+
+  **Honest scope**: this is time-window + process-name-substring
+  correlation, not strict PID/causal lineage tracing. Reliably proving
+  "this exact PowerShell process is a child of this exact Word
+  process, and this exact file write came from that PowerShell
+  process" needs deeper OS instrumentation (a filesystem minifilter
+  driver, ETW process-correlated file events) that's out of scope for
+  a dependency-light v1. Documented directly in
+  `detection/correlation_engine.py`.
+
+Six starter rule files ship in `rules/`, one per spec-listed rule
+type plus the correlation example above (`suspicious_powershell.yaml`,
+`persistence_from_temp.yaml`, `network_c2_port.yaml`,
+`executable_double_extension.yaml`, `defender_detection.yaml`,
+`correlation_office_powershell_chain.yaml`) — illustrative starting
+points, not exhaustive threat intel, same spirit as Phase 7's bundled
+YARA rules.
+
+**Where it runs**: `monitors/correlation_monitor.py` is a background
+worker unlike every other monitor — it doesn't observe the OS, it
+polls the `events` table itself (`monitoring.correlation_poll_interval_seconds`,
+default 10s). Each poll: condition rules run against events newer
+than the last one seen (a simple cursor); correlation scenarios run
+against a rolling window (`monitoring.correlation_window_minutes`,
+default 15). Already-correlated event IDs are tracked in memory only
+(not persisted), so — like every other monitor's "don't replay old
+history on restart" behavior — a restart could in theory re-match a
+chain whose events are still within the window; a minor, documented
+trade-off.
+
+**Risk scoring**: the 0-20/21-40/41-60/61-80/81-100 severity bands
+have existed since Phase 4 (`detection/risk.py`), and every monitor's
+`reasons` list has always explained its score — that requirement was
+already satisfied. What Phase 11 adds is `severity_floor()` (the
+inverse of the band mapping: given a rule's declared severity, what's
+the minimum risk score consistent with it), used so a YAML rule's
+declared severity can only ever raise an event's risk, never lower it
+below what the rule demands. The **`alerts` and `incidents` tables
+have existed since Phase 1 but sat completely unused until now** — the
+`/status` dashboard's `threats_detected`/`recent_alerts` counters have
+shown `0` since Phase 2 for exactly that reason, and now reflect real
+data.
+
+No automatic remediation happens here — matching an alert/incident
+never kills a process, quarantines a file, or blocks anything by
+itself. That's Phase 12's job, and the spec is explicit that it needs
+its own confirmation step.
+
 ## Testing
 
 ```bash
@@ -472,7 +572,7 @@ reduced-functionality fallback when not running elevated.
 8. ✅ Network monitoring
 9. ✅ Persistence monitoring
 10. ✅ Windows log analyzer
-11. Behavior correlation + risk scoring
+11. ✅ Behavior correlation + risk scoring
 12. Quarantine + response actions
 13. Testing, performance optimization, PyInstaller packaging
 

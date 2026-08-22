@@ -1,6 +1,6 @@
 """URL/file/network/persistence/log/behavior detection engine.
 
-* detection/risk.py -- risk score -> severity band mapping (Phase 4).
+* detection/risk.py -- risk score <-> severity band mapping (Phase 4/11).
 * detection/entropy.py -- shared Shannon entropy helper (Phase 5/7).
 * detection/lolbins.py -- shared LOLBin process names + suspicious
   command-line keywords (Phase 6/8/9/10).
@@ -22,19 +22,29 @@
   targets (Phase 9).
 * detection/log_analysis.py -- classification/scoring for normalized
   Windows Event Log records (Phase 10).
+* detection/rules_loader.py -- loads/validates YAML condition rules
+  and correlation scenarios from rules/ (Phase 11).
+* detection/rule_engine.py -- matches a single event against loaded
+  condition rules (Phase 11).
+* detection/correlation_engine.py -- time-window correlation of
+  multiple events into one incident (Phase 11).
 """
 
+from detection.correlation_engine import CorrelationEvent, ScenarioMatch, find_scenario_matches
 from detection.file_analysis import FileAnalysis, analyze_file
 from detection.log_analysis import LogEventClassification, classify_log_event
 from detection.network_analysis import NetworkAnalysis, analyze_connection
 from detection.persistence_analysis import PersistenceAnalysis, analyze_persistence_entry
 from detection.reputation import NullReputationProvider, ReputationProvider, get_reputation_provider
-from detection.risk import severity_for_risk
+from detection.risk import severity_floor, severity_for_risk
+from detection.rule_engine import RuleMatch, evaluate_condition_rule, evaluate_condition_rules
+from detection.rules_loader import ConditionRule, CorrelationScenario, load_rules
 from detection.url_analysis import UrlAnalysis, analyze_url
 from detection.yara_engine import YaraEngine, YaraMatch
 
 __all__ = [
     "severity_for_risk",
+    "severity_floor",
     "analyze_url",
     "UrlAnalysis",
     "analyze_file",
@@ -50,4 +60,13 @@ __all__ = [
     "get_reputation_provider",
     "YaraEngine",
     "YaraMatch",
+    "load_rules",
+    "ConditionRule",
+    "CorrelationScenario",
+    "evaluate_condition_rule",
+    "evaluate_condition_rules",
+    "RuleMatch",
+    "find_scenario_matches",
+    "CorrelationEvent",
+    "ScenarioMatch",
 ]

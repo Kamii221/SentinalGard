@@ -1,0 +1,12 @@
+# File rule: a newly created/modified file already flagged by
+# detection/file_analysis.py's double-extension check (e.g.
+# "invoice.pdf.exe") -- escalated here to make sure it always
+# produces an alert regardless of the base heuristic score.
+name: Executable disguised as a document
+severity: high
+conditions:
+  event_type:
+    - file_created
+    - file_modified
+  indicators:
+    - disguises itself as a document

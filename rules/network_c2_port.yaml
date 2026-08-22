@@ -1,0 +1,10 @@
+# Network rule: any outbound connection whose destination port shows
+# up in the connection's own reasons as a known C2-associated port
+# (detection/network_analysis.py already flags this; this rule
+# demonstrates escalating an already-flagged network event further).
+name: Outbound connection to a C2-associated port
+severity: high
+conditions:
+  event_type: network_connection
+  indicators:
+    - "associated with malware c2"
