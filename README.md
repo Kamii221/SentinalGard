@@ -10,8 +10,9 @@ Allow Once / Always Allow / Always Block controls through a desktop GUI.
 Everything runs on `127.0.0.1` and stores events in a local SQLite
 database. Nothing is uploaded anywhere by default.
 
-> **Status:** Phase 1 of 13 complete (project structure, configuration,
-> database schema, logging). See "Build Order" below for what's next.
+> **Status:** Phase 2 of 13 complete (project structure, configuration,
+> database schema, logging, local FastAPI agent + authentication). See
+> "Build Order" below for what's next.
 
 ## Architecture
 
@@ -73,13 +74,15 @@ pip install -r requirements.txt
 ## Running
 
 ```bash
-python main.py
+python main.py            # bootstrap only: config, logging, DB schema
+python main.py --serve    # also start the local agent on 127.0.0.1:8765
 ```
 
-Phase 1 bootstrap: loads configuration, sets up rotating file + console
-logging, and creates the SQLite schema at the platform data directory
+Bootstrap loads configuration, sets up rotating file + console logging,
+and creates the SQLite schema at the platform data directory
 (`%APPDATA%\SentinelGuard` on Windows, `~/.sentinelguard` elsewhere).
-The FastAPI agent and GUI are not started yet — that lands in Phases 2-3.
+`--serve` additionally starts the FastAPI agent, bound to loopback only.
+The GUI is not started yet — that lands in Phase 3.
 
 Use a custom config file:
 
@@ -88,6 +91,27 @@ python main.py --config path\to\config.yaml
 ```
 
 Any subset of `config/default_config.yaml`'s keys can be overridden.
+
+### The local agent (Phase 2)
+
+`python main.py --serve` starts a FastAPI service on
+`http://127.0.0.1:8765` (configurable via `api.port`). It:
+
+* Refuses any connection whose TCP peer isn't a loopback address
+  (`LoopbackOnlyMiddleware`), independent of the uvicorn bind address.
+* Generates a per-install bearer token on first run, stored at
+  `<data_dir>/agent_token` with owner-only file permissions. Clients
+  send it via the `X-SentinelGuard-Token` header.
+* `GET /api/v1/health` — unauthenticated liveness check (app name/version only).
+* `GET /api/v1/status` — authenticated dashboard counters (protection
+  status, uptime, websites/threats/processes/network/alerts counts).
+* `POST /api/v1/auth/rotate-token` — authenticated; rotates the shared
+  secret and returns the new value once. Requires the *current* token,
+  so an unauthenticated caller can't lock out the real owner. Every
+  admin action is written to both the log file and the `events` table.
+
+Browser extensions (Phase 4) and the GUI (Phase 3) will use this same
+token to talk to the agent; no data leaves 127.0.0.1.
 
 ## Testing
 
@@ -121,7 +145,7 @@ reduced-functionality fallback when not running elevated.
 ## Build order
 
 1. ✅ Project structure + configuration + SQLite + logging
-2. FastAPI localhost agent + authentication
+2. ✅ FastAPI localhost agent + authentication
 3. PySide6 GUI + dashboard
 4. Chrome/Edge/Firefox URL-monitoring extensions
 5. URL detection + allow/block engine
