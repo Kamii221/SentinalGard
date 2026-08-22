@@ -1,0 +1,22 @@
+# Event correlation rule -- the spec's own worked example:
+# Office process -> PowerShell -> network connection -> executable
+# created -> persistence created, all within a rolling window, should
+# produce ONE high-confidence incident rather than five separate
+# alerts.
+#
+# Honest scope: this is time-window + process-name correlation, not
+# strict PID/causal lineage tracing (see
+# detection/correlation_engine.py for why). Each step just needs to
+# occur no earlier than the previous step's matched event, within
+# window_minutes of the first matched event.
+name: Office document spawns PowerShell, then reaches out and persists
+severity: critical
+window_minutes: 15
+steps:
+  - event_types: [process_create]
+    process_contains: [winword.exe, excel.exe, powerpnt.exe, outlook.exe]
+  - event_types: [process_create]
+    process_contains: [powershell.exe, pwsh.exe, wscript.exe, cscript.exe, mshta.exe]
+  - event_types: [network_connection]
+  - event_types: [file_created]
+  - event_types: [persistence_new]

@@ -33,7 +33,7 @@ from api.schemas import (
 )
 from api.security import require_agent_token
 from config.settings import RiskConfig, Settings
-from database.models import AllowlistEntry, BlocklistEntry, Website
+from database.models import AllowlistEntry, BlocklistEntry, Event, Website
 from detection.risk import Severity, severity_for_risk
 from detection.url_analysis import analyze_url
 
@@ -117,6 +117,27 @@ def check_website(
             severity=severity,
             reason=reason,
             action=action,
+        )
+    )
+    # Also feed the unified events stream (websites/check previously
+    # only wrote to the `websites` table), so the rule engine and
+    # correlation (Phase 11) can see URL/website activity like every
+    # other monitor's events.
+    session.add(
+        Event(
+            event_type="website_check",
+            source="url_detection",
+            process=None,
+            user=None,
+            severity=severity,
+            risk_score=risk,
+            details={
+                "url": payload.url,
+                "domain": domain,
+                "browser": payload.browser,
+                "action": action,
+                "reason": reason,
+            },
         )
     )
     session.commit()

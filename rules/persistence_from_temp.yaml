@@ -1,0 +1,10 @@
+# Persistence rule: a new Run key / service / scheduled task /
+# startup-folder entry whose command references a Temp or Downloads
+# path -- a common malware persistence pattern.
+name: Persistence entry from a temporary location
+severity: high
+conditions:
+  event_type: persistence_new
+  indicators:
+    - \temp\
+    - \downloads\

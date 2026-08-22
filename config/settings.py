@@ -143,6 +143,11 @@ class MonitoringConfig(BaseModel):
     # Windows Event Log channels aren't as time-critical as live
     # process/network activity but are more so than persistence.
     log_poll_interval_seconds: float = Field(default=15.0, gt=0)
+    # How often the rule/correlation engine re-scans recent events.
+    correlation_poll_interval_seconds: float = Field(default=10.0, gt=0)
+    # How far back correlation scenarios look for their steps to have
+    # all occurred -- a rolling window, not a fixed lookback from now.
+    correlation_window_minutes: float = Field(default=15.0, gt=0)
 
 
 class Settings(BaseModel):

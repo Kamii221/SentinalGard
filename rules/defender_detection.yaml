@@ -1,0 +1,8 @@
+# Log rule: always alert on a Windows Defender detection, regardless
+# of anything else -- Defender's own verdict is already high-confidence.
+name: Windows Defender threat detected
+severity: critical
+conditions:
+  event_type:
+    - defender_threat_detected
+    - defender_threat_action
