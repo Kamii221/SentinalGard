@@ -10,11 +10,12 @@ Allow Once / Always Allow / Always Block controls through a desktop GUI.
 Everything runs on `127.0.0.1` and stores events in a local SQLite
 database. Nothing is uploaded anywhere by default.
 
-> **Status:** Phase 6 of 13 complete (project structure, configuration,
+> **Status:** Phase 7 of 13 complete (project structure, configuration,
 > database schema, logging, local FastAPI agent + authentication,
 > PySide6 GUI + dashboard, Chrome/Edge/Firefox URL-monitoring
-> extensions, URL detection + allow/block engine, process monitoring).
-> See "Build Order" below for what's next.
+> extensions, URL detection + allow/block engine, process monitoring,
+> file monitoring + hashing + YARA). See "Build Order" below for
+> what's next.
 
 ## Architecture
 
@@ -231,6 +232,60 @@ requirements.
 The monitor starts automatically whenever the agent runs (`--serve` or
 `--gui`), controlled by `monitoring.enabled` (default `true`).
 
+### File monitoring + hashing + YARA (Phase 7)
+
+`monitors/file_monitor.py` uses `watchdog` for OS-level filesystem
+events — event-driven, not polling — restricted to a handful of
+security-sensitive top-level directories (Downloads, Desktop, Temp,
+Startup on Windows; equivalent dev-friendly paths elsewhere) and never
+recursive into subdirectories: never a full-disk scan. Only files
+whose extension is executable/script/DLL (`detection/file_analysis.py`
+`TRACKED_EXTENSIONS`) trigger any hashing or reading — every other
+file event is dropped before any I/O happens. Override the watched
+locations with `monitoring.file_watch_paths`.
+
+For each new/modified tracked file it records a `files` row and a
+normalized `events` row, combining:
+
+* Local heuristics (`detection/file_analysis.py`): base points for a
+  new executable/script/DLL appearing, extra points for an existing
+  tracked file being *modified* (unusual — legitimate binaries rarely
+  get silently rewritten), the double-extension trick
+  (`invoice.pdf.exe`), and high-entropy content (sampled — never the
+  whole file, capped by `monitoring.file_entropy_sample_bytes`) as a
+  signal for packed/encrypted/obfuscated code.
+- A known-malicious-hash lookup against the *same* `blocklist` table
+  used for domains (`entry_type="hash"`) — an exact match short-circuits
+  straight to Critical, same precedence pattern as the website
+  blocklist.
+* A YARA scan (`detection/yara_engine.py`): compiles every `.yar`
+  file under `yara/` once at startup (never per-scan) and adds each
+  match's rule name + description directly into the reasons — a
+  strong, self-documenting signal. Three starter rules are bundled:
+  the industry-standard EICAR test-file signature (safe, not real
+  malware — the standard way to verify an AV engine actually detects
+  something), a PowerShell/script download-cradle pattern
+  (`DownloadString`, `-EncodedCommand`, …), and a heuristic PE
+  process-injection-API combination. Degrades gracefully to "no YARA
+  signal" if `yara-python` isn't installed or no rules compile —
+  never breaks file monitoring.
+
+**A real bug found via live testing, not just unit tests:** dropping a
+file under a non-tracked name and then renaming it to a tracked
+extension (exactly how browsers land downloads — `.crdownload` →
+`.exe`) was invisible to the monitor, because watchdog reports a
+rename as `on_moved`, not `on_created`/`on_modified`, and the handler
+only listened for those two. Fixed by treating `on_moved` into a
+tracked extension as a creation at the destination path, with a
+regression test for the exact scenario (verified both at the unit
+level and against a real watchdog observer).
+
+`monitors/hashing.py` (hash a file, capped by size; sample the first N
+bytes) and `detection/entropy.py` (Shannon entropy) are now shared
+utilities — deduped out of Phase 5's URL indicators and Phase 6's
+process monitor respectively, since file monitoring needed the same
+logic a third time.
+
 ## Testing
 
 ```bash
@@ -268,7 +323,7 @@ reduced-functionality fallback when not running elevated.
 4. ✅ Chrome/Edge/Firefox URL-monitoring extensions
 5. ✅ URL detection + allow/block engine
 6. ✅ Process monitoring
-7. File monitoring + hashing + YARA
+7. ✅ File monitoring + hashing + YARA
 8. Network monitoring
 9. Persistence monitoring
 10. Windows log analyzer

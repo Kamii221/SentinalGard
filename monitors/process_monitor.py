@@ -22,7 +22,6 @@ correlation engine decides which events become alerts.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import threading
 from dataclasses import dataclass
@@ -34,6 +33,7 @@ from agent.logging_setup import get_logger
 from config.settings import MonitoringConfig, RiskConfig
 from database.models import Event, ProcessRecord
 from detection.risk import severity_for_risk
+from monitors.hashing import hash_file
 from monitors.queue_worker import QueueWriter
 
 _log = get_logger("monitors.process")
@@ -67,19 +67,6 @@ class _ProcInfo:
 class _ProcessEvent:
     info: _ProcInfo
     status: str  # "running" | "terminated"
-
-
-def _hash_file(path: str, max_bytes: int) -> str | None:
-    try:
-        if os.path.getsize(path) > max_bytes:
-            return None
-        digest = hashlib.sha256()
-        with open(path, "rb") as fh:
-            for chunk in iter(lambda: fh.read(65536), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
-    except OSError:
-        return None
 
 
 def _integrity_level(pid: int) -> str | None:
@@ -226,7 +213,7 @@ class ProcessMonitor:
         info = event.info
         if event.status == "running":
             risk, reasons = _score_process(info)
-            sha256 = _hash_file(info.exe, self._config.process_hash_max_bytes) if info.exe else None
+            sha256 = hash_file(info.exe, self._config.process_hash_max_bytes) if info.exe else None
             integrity = _integrity_level(info.pid)
         else:
             risk, reasons = 0, ["Process exited"]

@@ -124,6 +124,14 @@ class MonitoringConfig(BaseModel):
     # New-process executables larger than this are never hashed (avoids
     # stalling the writer thread on huge binaries).
     process_hash_max_bytes: int = Field(default=25_000_000, gt=0)
+    # Same cap, applied to newly observed files in watched directories.
+    file_hash_max_bytes: int = Field(default=25_000_000, gt=0)
+    # Bytes sampled from the start of a file for entropy scoring --
+    # never read the whole file just to estimate entropy.
+    file_entropy_sample_bytes: int = Field(default=1_000_000, gt=0)
+    # None => auto-detect security-sensitive locations (Downloads,
+    # Desktop, Temp, Startup, ...). Set explicitly to override/restrict.
+    file_watch_paths: list[str] | None = None
 
 
 class Settings(BaseModel):
