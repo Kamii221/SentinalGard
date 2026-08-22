@@ -1,7 +1,9 @@
-"""URL/file/network/behavior detection engine.
+"""URL/file/network/persistence/behavior detection engine.
 
 * detection/risk.py -- risk score -> severity band mapping (Phase 4).
 * detection/entropy.py -- shared Shannon entropy helper (Phase 5/7).
+* detection/lolbins.py -- shared LOLBin process names + suspicious
+  command-line keywords (Phase 6/8/9).
 * detection/indicators.py -- individual local URL heuristics (Phase 5).
 * detection/url_analysis.py -- combines URL indicators + reputation
   into one explainable score (Phase 5).
@@ -15,10 +17,14 @@
 * detection/network_analysis.py -- local network-connection
   heuristics: LOLBin network activity, suspicious C2 ports,
   known-malicious-IP lookup (Phase 8).
+* detection/persistence_analysis.py -- local persistence-entry
+  heuristics: LOLBin commands, suspicious keywords/locations, missing
+  targets (Phase 9).
 """
 
 from detection.file_analysis import FileAnalysis, analyze_file
 from detection.network_analysis import NetworkAnalysis, analyze_connection
+from detection.persistence_analysis import PersistenceAnalysis, analyze_persistence_entry
 from detection.reputation import NullReputationProvider, ReputationProvider, get_reputation_provider
 from detection.risk import severity_for_risk
 from detection.url_analysis import UrlAnalysis, analyze_url
@@ -32,6 +38,8 @@ __all__ = [
     "FileAnalysis",
     "analyze_connection",
     "NetworkAnalysis",
+    "analyze_persistence_entry",
+    "PersistenceAnalysis",
     "ReputationProvider",
     "NullReputationProvider",
     "get_reputation_provider",

@@ -10,12 +10,12 @@ Allow Once / Always Allow / Always Block controls through a desktop GUI.
 Everything runs on `127.0.0.1` and stores events in a local SQLite
 database. Nothing is uploaded anywhere by default.
 
-> **Status:** Phase 8 of 13 complete (project structure, configuration,
+> **Status:** Phase 9 of 13 complete (project structure, configuration,
 > database schema, logging, local FastAPI agent + authentication,
 > PySide6 GUI + dashboard, Chrome/Edge/Firefox URL-monitoring
 > extensions, URL detection + allow/block engine, process monitoring,
-> file monitoring + hashing + YARA, network monitoring). See "Build
-> Order" below for what's next.
+> file monitoring + hashing + YARA, network monitoring, persistence
+> monitoring). See "Build Order" below for what's next.
 
 ## Architecture
 
@@ -327,6 +327,54 @@ Listing all users' connections can require Administrator/root
 privileges on some platforms (notably macOS); this degrades to "no
 data" rather than crashing if access is denied.
 
+### Persistence monitoring (Phase 9)
+
+`monitors/persistence_monitor.py` polls four persistence locations —
+registry `Run`/`RunOnce` keys (HKCU/HKLM, plus the WOW6432Node 32-bit
+view), startup folders, scheduled tasks (via the Task Scheduler COM
+API), and services (via the Service Control Manager) — at a much
+longer interval than the other monitors
+(`monitoring.persistence_poll_interval_seconds`, default 30s), since
+persistence entries change far less often than processes or
+connections. Same diff-based "only new" pattern as process/network
+monitoring; a persistence entry whose *command* changes (e.g. an
+existing Run key hijacked to point somewhere else while keeping the
+same name) is also treated as new, since the identity key includes
+the command.
+
+**Most of this is inherently Windows-only** — there's no "Run key"
+concept on Linux — so every backend function safely returns an empty
+list on any other platform or when the required Windows API isn't
+available; the monitor still starts and runs cleanly everywhere, it
+just finds nothing off Windows, which is the honest behavior rather
+than crashing or fabricating data. Enumerating `HKEY_LOCAL_MACHINE`,
+services, and some scheduled tasks can require Administrator
+privileges; each backend degrades gracefully (skips what it can't
+read) rather than failing the whole scan.
+
+There's no dedicated `persistence` table in the schema — findings go
+through the normalized `events` table (`event_type="persistence_new"`),
+with source-specific fields (registry key, task path, service name,
+…) in `details`. `detection/persistence_analysis.py` scores each entry
+using the same shared LOLBin/suspicious-keyword lists as process and
+network monitoring (`detection/lolbins.py`, now needed a third time),
+plus a suspicious-location check (Temp/Downloads) and a
+missing-target check (the referenced executable no longer exists on
+disk — a mild signal on its own, since this also happens harmlessly
+after an uninstall).
+
+**Caveat**: the registry/scheduled-task/service backends use
+`winreg`/`pywin32` APIs that only exist on Windows and could not be
+run or verified in this project's Linux development environment.
+They're written carefully against documented API behavior and wrapped
+defensively throughout, but — unlike every other monitor in this
+project — they haven't been exercised against the real APIs and
+should be spot-checked on an actual Windows machine before being
+relied on. The rest of the pipeline (diffing, scoring, writing to the
+database) *was* verified end-to-end using synthetic entries injected
+through the same backend-injection interface the real Windows
+backends implement.
+
 ## Testing
 
 ```bash
@@ -366,7 +414,7 @@ reduced-functionality fallback when not running elevated.
 6. ✅ Process monitoring
 7. ✅ File monitoring + hashing + YARA
 8. ✅ Network monitoring
-9. Persistence monitoring
+9. ✅ Persistence monitoring
 10. Windows log analyzer
 11. Behavior correlation + risk scoring
 12. Quarantine + response actions

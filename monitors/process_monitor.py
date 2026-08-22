@@ -32,24 +32,12 @@ from sqlalchemy.orm import sessionmaker
 from agent.logging_setup import get_logger
 from config.settings import MonitoringConfig, RiskConfig
 from database.models import Event, ProcessRecord
+from detection.lolbins import LOLBIN_PROCESS_NAMES, SUSPICIOUS_CMDLINE_KEYWORDS
 from detection.risk import severity_for_risk
 from monitors.hashing import hash_file
 from monitors.queue_worker import QueueWriter
 
 _log = get_logger("monitors.process")
-
-_SUSPICIOUS_PROCESS_NAMES = frozenset(
-    {
-        "powershell.exe", "pwsh.exe", "cmd.exe", "wscript.exe", "cscript.exe",
-        "mshta.exe", "regsvr32.exe", "rundll32.exe", "certutil.exe",
-    }
-)
-
-_SUSPICIOUS_CMDLINE_KEYWORDS = (
-    "-encodedcommand", "-enc ", "downloadstring", "invoke-webrequest",
-    "invoke-expression", "iex(", "-nop", "-noni", "-w hidden",
-    "-windowstyle hidden", "bypass",
-)
 
 
 @dataclass(frozen=True)
@@ -104,12 +92,12 @@ def _score_process(info: _ProcInfo) -> tuple[int, list[str]]:
     score = 0
     reasons: list[str] = []
 
-    if info.name.lower() in _SUSPICIOUS_PROCESS_NAMES:
+    if info.name.lower() in LOLBIN_PROCESS_NAMES:
         score += 20
         reasons.append(f"'{info.name}' is a commonly abused Windows utility (potential LOLBin)")
 
     cmdline_lower = (info.cmdline or "").lower()
-    hits = [kw.strip() for kw in _SUSPICIOUS_CMDLINE_KEYWORDS if kw in cmdline_lower]
+    hits = [kw.strip() for kw in SUSPICIOUS_CMDLINE_KEYWORDS if kw in cmdline_lower]
     if hits:
         score += 30
         reasons.append(f"Command line contains suspicious indicators ({', '.join(hits)})")

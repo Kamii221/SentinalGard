@@ -22,6 +22,7 @@ from config.settings import Settings
 from database.engine import create_session_factory, init_db
 from monitors.file_monitor import FileMonitor
 from monitors.network_monitor import NetworkMonitor
+from monitors.persistence_monitor import PersistenceMonitor
 from monitors.process_monitor import ProcessMonitor
 
 _log = get_logger("api")
@@ -38,10 +39,12 @@ def create_app(settings: Settings) -> FastAPI:
     process_monitor: ProcessMonitor | None = None
     file_monitor: FileMonitor | None = None
     network_monitor: NetworkMonitor | None = None
+    persistence_monitor: PersistenceMonitor | None = None
     if settings.monitoring.enabled:
         process_monitor = ProcessMonitor(session_factory, settings.monitoring, settings.risk)
         file_monitor = FileMonitor(session_factory, settings.monitoring, settings.risk)
         network_monitor = NetworkMonitor(session_factory, settings.monitoring, settings.risk)
+        persistence_monitor = PersistenceMonitor(session_factory, settings.monitoring, settings.risk)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -52,7 +55,11 @@ def create_app(settings: Settings) -> FastAPI:
             file_monitor.start()
         if network_monitor is not None:
             network_monitor.start()
+        if persistence_monitor is not None:
+            persistence_monitor.start()
         yield
+        if persistence_monitor is not None:
+            persistence_monitor.stop()
         if network_monitor is not None:
             network_monitor.stop()
         if file_monitor is not None:
@@ -79,6 +86,7 @@ def create_app(settings: Settings) -> FastAPI:
     app.state.process_monitor = process_monitor
     app.state.file_monitor = file_monitor
     app.state.network_monitor = network_monitor
+    app.state.persistence_monitor = persistence_monitor
 
     app.add_middleware(LoopbackOnlyMiddleware)
 

@@ -18,14 +18,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from config.settings import RiskConfig
+from detection.lolbins import LOLBIN_PROCESS_NAMES
 from detection.risk import Severity, severity_for_risk
-
-_LOLBIN_PROCESS_NAMES = frozenset(
-    {
-        "powershell.exe", "pwsh.exe", "cmd.exe", "wscript.exe", "cscript.exe",
-        "mshta.exe", "regsvr32.exe", "rundll32.exe", "certutil.exe",
-    }
-)
 
 # Ports historically associated with common malware/backdoor/C2
 # tooling defaults (e.g. Metasploit's 4444). Not exhaustive, and
@@ -41,7 +35,7 @@ class NetworkFinding:
 
 
 def check_lolbin_network_activity(process_name: str | None) -> NetworkFinding | None:
-    if process_name and process_name.lower() in _LOLBIN_PROCESS_NAMES:
+    if process_name and process_name.lower() in LOLBIN_PROCESS_NAMES:
         return NetworkFinding(
             35,
             f"'{process_name}' is a commonly abused Windows utility making an outbound network "
