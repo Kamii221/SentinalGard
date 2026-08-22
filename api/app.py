@@ -15,6 +15,7 @@ from agent.logging_setup import get_logger
 from api.middleware import LoopbackOnlyMiddleware
 from api.routes import auth as auth_routes
 from api.routes import health as health_routes
+from api.routes import response as response_routes
 from api.routes import status as status_routes
 from api.routes import websites as websites_routes
 from api.security import TokenStore
@@ -110,6 +111,7 @@ def create_app(settings: Settings) -> FastAPI:
     app.include_router(status_routes.router, prefix="/api/v1")
     app.include_router(auth_routes.router, prefix="/api/v1")
     app.include_router(websites_routes.router, prefix="/api/v1")
+    app.include_router(response_routes.router, prefix="/api/v1")
 
     @app.exception_handler(RequestValidationError)
     async def _validation_error_handler(_: Request, exc: RequestValidationError) -> JSONResponse:

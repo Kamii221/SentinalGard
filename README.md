@@ -10,13 +10,14 @@ Allow Once / Always Allow / Always Block controls through a desktop GUI.
 Everything runs on `127.0.0.1` and stores events in a local SQLite
 database. Nothing is uploaded anywhere by default.
 
-> **Status:** Phase 11 of 13 complete (project structure, configuration,
+> **Status:** Phase 12 of 13 complete (project structure, configuration,
 > database schema, logging, local FastAPI agent + authentication,
 > PySide6 GUI + dashboard, Chrome/Edge/Firefox URL-monitoring
 > extensions, URL detection + allow/block engine, process monitoring,
 > file monitoring + hashing + YARA, network monitoring, persistence
 > monitoring, Windows log analyzer, behavior correlation + risk
-> scoring). See "Build Order" below for what's next.
+> scoring, quarantine + response actions). See "Build Order" below for
+> what's next.
 
 ## Architecture
 
@@ -531,6 +532,62 @@ never kills a process, quarantines a file, or blocks anything by
 itself. That's Phase 12's job, and the spec is explicit that it needs
 its own confirmation step.
 
+### Quarantine + response actions (Phase 12)
+
+Block/Allow/Allow-once for URLs already existed (Phase 4/5, via
+`POST /websites/decision`). This phase adds the rest of the spec's
+Response section: `response/actions.py` implements the actions
+themselves, `api/routes/response.py` is the thin HTTP layer.
+
+**Every destructive action (kill-process, quarantine-file,
+disable-persistence) requires an explicit `confirm: true`** in the
+request body — omit it and the agent 400s and does nothing. This is
+the literal API-level enforcement of "require confirmation before
+destructive actions"; a future GUI confirmation dialog is what's
+expected to set that flag. Every successful action is logged as an
+admin action (`agent/audit.py`) and recorded in `events`, so it's
+visible in the same unified stream as everything else — including to
+the rule/correlation engine from Phase 11.
+
+* **`POST /response/kill-process`** — `psutil`-based `terminate()`,
+  escalating to `kill()` after a 3s timeout. Refuses to kill the
+  agent's own process, and refuses a small denylist of protected
+  system process names (`lsass.exe`, `csrss.exe`, `wininit.exe`,
+  `services.exe`, `svchost.exe`, …) regardless of `confirm` — not an
+  explicit spec requirement, but a direct safety consequence of
+  "restrict privileged operations": a bad rule or a mistaken PID
+  shouldn't be able to crash the OS.
+* **`POST /response/quarantine-file`** / **`POST
+  /response/restore-quarantine`** — moves a file into
+  `<data_dir>/quarantine/` under a random `<uuid>.quarantined` name,
+  fully disconnected from the original filename/extension so it can't
+  be accidentally re-triggered, with permissions stripped on POSIX.
+  Records a `QuarantineItem` row (a table that's existed since Phase 1
+  but was unused until now) and restore completes the round trip —
+  its `restored`/`restored_at` fields finally get used too. Refuses to
+  quarantine a relative path, a missing file, a directory, or a file
+  already inside the quarantine directory.
+* **`POST /response/disable-persistence`** — dispatches by
+  `source_type` (matching Phase 9's `PersistenceEntry` shape):
+  registry Run/RunOnce values get deleted via `winreg`, services get
+  their start type set to Disabled (not deleted — reversible) via
+  `win32service`, scheduled tasks get `Enabled = False` (not deleted)
+  via the Task Scheduler COM API, and startup-folder entries get
+  quarantined (reusing the mechanism above, since disabling a
+  file-based entry just means moving the file). **Same honest caveat
+  as Phases 9-10**: the registry/service/task backends are Windows-only
+  and could not be run/verified in this Linux dev environment —
+  written against documented API behavior and wrapped defensively,
+  but flagged as needing a real-Windows spot-check. The
+  startup-folder case is plain file operations and *is* genuinely
+  tested, including live, end-to-end.
+* **`GET /incidents/{id}/export`** — returns the incident plus every
+  one of its related events, fully expanded, as JSON.
+* **`POST /alerts/{id}/false-positive`** / **`POST
+  /incidents/{id}/false-positive`** — sets `status="false_positive"`.
+  Not gated by `confirm`: marking something as a false positive isn't
+  destructive, it's just triage.
+
 ## Testing
 
 ```bash
@@ -573,7 +630,7 @@ reduced-functionality fallback when not running elevated.
 9. ✅ Persistence monitoring
 10. ✅ Windows log analyzer
 11. ✅ Behavior correlation + risk scoring
-12. Quarantine + response actions
+12. ✅ Quarantine + response actions
 13. Testing, performance optimization, PyInstaller packaging
 
 ## Privacy

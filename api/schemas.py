@@ -123,3 +123,58 @@ class WebsiteDecisionRequest(BaseModel):
 class WebsiteDecisionResponse(BaseModel):
     status: str
     applied: str
+
+
+PersistenceSourceType = Literal["registry_run", "registry_runonce", "startup_folder", "scheduled_task", "service"]
+
+
+class KillProcessRequest(BaseModel):
+    pid: int = Field(..., gt=0)
+    confirm: bool = False
+
+
+class KillProcessResponse(BaseModel):
+    status: str
+    pid: int
+    name: str
+
+
+class QuarantineFileRequest(BaseModel):
+    path: str = Field(..., max_length=4096)
+    reason: str = Field(default="", max_length=1000)
+    confirm: bool = False
+
+
+class QuarantineFileResponse(BaseModel):
+    status: str
+    quarantine_id: int
+    original_path: str
+    quarantine_path: str
+
+
+class RestoreQuarantineRequest(BaseModel):
+    quarantine_id: int
+    confirm: bool = False
+
+
+class RestoreQuarantineResponse(BaseModel):
+    status: str
+    original_path: str
+
+
+class DisablePersistenceRequest(BaseModel):
+    source_type: PersistenceSourceType
+    location: str = Field(..., max_length=1024)
+    name: str = Field(..., max_length=512)
+    confirm: bool = False
+
+
+class DisablePersistenceResponse(BaseModel):
+    status: str
+    action: str
+    details: dict
+
+
+class FalsePositiveResponse(BaseModel):
+    status: str
+    id: int
