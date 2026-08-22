@@ -47,3 +47,4 @@ monitoring:
   file_watch_paths: null
   network_poll_interval_seconds: 3.0
   network_reverse_dns_timeout_seconds: 1.5
+  persistence_poll_interval_seconds: 30.0

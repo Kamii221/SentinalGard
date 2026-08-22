@@ -136,6 +136,10 @@ class MonitoringConfig(BaseModel):
     # Bounded wait for a single reverse-DNS lookup; results are cached
     # by IP so the same destination is never looked up twice.
     network_reverse_dns_timeout_seconds: float = Field(default=1.5, gt=0)
+    # Persistence entries (Run keys, services, scheduled tasks, ...)
+    # change far less often than processes/connections, so a much
+    # longer poll interval is appropriate.
+    persistence_poll_interval_seconds: float = Field(default=30.0, gt=0)
 
 
 class Settings(BaseModel):
