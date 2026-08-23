@@ -7,7 +7,7 @@ import sys
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from agent.logging_setup import get_logger
-from agent.server import start_agent_in_background, wait_for_agent_ready
+from agent.server import ensure_agent_running
 from config.settings import Settings
 from gui.main_window import MainWindow
 from gui.theme import DARK_STYLESHEET
@@ -19,37 +19,20 @@ _log = get_logger("gui")
 def run_gui(settings: Settings, start_minimized: bool = False) -> int:
     # A previous launch (the installer's "start with Windows" shortcut,
     # an already-open window, a `--serve` instance, ...) may already have
-    # the agent bound to this port. Trying to bind again would just fail
-    # with "address already in use" on a background thread where nothing
-    # surfaces the error -- the GUI would sit there reporting "Agent
-    # unreachable" forever. Check first, and connect to what's already
-    # running instead of racing it.
-    agent_handle = None
-    if wait_for_agent_ready(settings, timeout=0.5):
-        _log.info("Agent already running on %s:%d; connecting to it", settings.api.host, settings.api.port)
+    # the agent bound to this port -- ensure_agent_running connects to it
+    # instead of racing it to bind again. If nothing's reachable, the
+    # dashboard's own "Start Agent" button (gui/pages/dashboard.py) can
+    # retry the same way without restarting the whole app.
+    connection = ensure_agent_running(settings)
+    agent_handle = connection.handle
+    if connection.reachable:
+        _log.info("Connected to agent on %s:%d", settings.api.host, settings.api.port)
     else:
-        agent_handle = start_agent_in_background(settings)
-        if not wait_for_agent_ready(settings, timeout=5.0):
-            # The 0.5s check above isn't airtight: two instances launched
-            # together (e.g. the installer's autostart entry racing a
-            # manual launch right after login) can both see "nothing
-            # running yet" and both try to bind. Whichever loses gets
-            # here with agent_handle.error set (most likely "address
-            # already in use") -- check once more for a winner before
-            # giving up, instead of sitting disconnected forever with a
-            # perfectly good agent already running right next to it.
-            if agent_handle.error is not None:
-                _log.warning("This instance's agent failed to start: %s", agent_handle.error)
-            if wait_for_agent_ready(settings, timeout=2.0):
-                _log.info("Another instance's agent is up; connecting to it instead")
-                agent_handle.stop()
-                agent_handle = None
-            else:
-                _log.warning(
-                    "Agent did not become ready in time; GUI will start in a disconnected state. "
-                    "Logs: %s",
-                    settings.data.resolved_log_dir(),
-                )
+        _log.warning(
+            "Agent not reachable at startup (%s); GUI will start in a disconnected state. Logs: %s",
+            connection.error,
+            settings.data.resolved_log_dir(),
+        )
 
     app = QApplication.instance() or QApplication(sys.argv)
     app.setStyleSheet(DARK_STYLESHEET)

@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 
 import pytest
@@ -5,7 +6,8 @@ from PySide6.QtCore import QTimer
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QApplication
 
-from agent.server import start_agent_in_background, wait_for_agent_ready
+import gui.pages.dashboard as dashboard_module
+from agent.server import AgentConnection, start_agent_in_background, wait_for_agent_ready
 from config.settings import load_settings
 from gui.app import run_gui
 from gui.main_window import MainWindow
@@ -62,6 +64,51 @@ def test_dashboard_reflects_live_agent_status(tmp_path: Path, qapp: QApplication
         handle.stop()
 
 
+def test_start_agent_button_starts_the_agent_and_refreshes(
+    monkeypatch: pytest.MonkeyPatch, qapp: QApplication, tmp_path: Path
+) -> None:
+    """Real end-to-end exercise of the manual retry button: nothing is
+    running when the window opens (so the button is visible), clicking
+    it must actually start the agent on a background thread, and the
+    dashboard must pick up the result via the Qt signal without the
+    caller needing to pump anything but the event loop."""
+    settings = _settings_with_port(tmp_path, 8787)
+    window = MainWindow(settings)
+    dashboard = window._stack.widget(0)
+    assert not dashboard._start_button.isHidden()
+
+    # Spy on the real ensure_agent_running so the test can stop whatever
+    # agent the button actually starts, without faking the button's own
+    # threading/signal wiring.
+    real_ensure_agent_running = dashboard_module.ensure_agent_running
+    started = {}
+
+    def _spy(settings_: object):
+        result = real_ensure_agent_running(settings_)
+        started["result"] = result
+        return result
+
+    monkeypatch.setattr(dashboard_module, "ensure_agent_running", _spy)
+
+    try:
+        dashboard._start_agent()
+        assert dashboard._starting is True
+
+        deadline = time.monotonic() + 10.0
+        while dashboard._starting and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.05)
+
+        assert "result" in started
+        assert started["result"].reachable is True
+        assert "ACTIVE" in dashboard._status_label.text()
+        assert dashboard._start_button.isHidden()
+    finally:
+        handle = started.get("result").handle if started.get("result") else None
+        if handle is not None:
+            handle.stop()
+
+
 def test_close_event_ignored_and_hides_window_when_minimized_to_tray(qapp: QApplication, tmp_path: Path) -> None:
     settings = _settings_with_port(tmp_path, 8793)
     window = MainWindow(settings, minimize_to_tray=True)
@@ -84,43 +131,50 @@ def test_close_event_accepted_without_tray(qapp: QApplication, tmp_path: Path) -
     assert event.isAccepted() is True
 
 
-def test_run_gui_recovers_when_it_loses_a_startup_race(
+def test_run_gui_stops_the_agent_it_started(
     monkeypatch: pytest.MonkeyPatch, qapp: QApplication, tmp_path: Path
 ) -> None:
-    """Deterministic version of the race two instances launched together
-    can hit: this one's own agent fails to bind (port already taken by
-    the other instance), but a recheck finds that other instance's
-    agent came up in the meantime -- run_gui must stop its own failed
-    handle and fall back to being a plain client, not sit disconnected
-    forever next to a perfectly good agent."""
+    """run_gui owns the handle ensure_agent_running() started for it,
+    so closing the window must stop that agent."""
     settings = _settings_with_port(tmp_path, 8789)
-
-    calls = {"wait": 0}
-
-    def fake_wait(_settings: object, timeout: float) -> bool:
-        calls["wait"] += 1
-        # 1: initial "is one already running" check -> no.
-        # 2: post-start readiness wait -> our own start failed.
-        # 3: race recheck -> the other instance is up now.
-        return calls["wait"] >= 3
 
     class FakeHandle:
         def __init__(self) -> None:
-            self.error = OSError("address already in use")
             self.stopped = False
 
         def stop(self, timeout: float = 5.0) -> None:
             self.stopped = True
 
     fake_handle = FakeHandle()
-    monkeypatch.setattr("gui.app.wait_for_agent_ready", fake_wait)
-    monkeypatch.setattr("gui.app.start_agent_in_background", lambda _settings: fake_handle)
+    monkeypatch.setattr(
+        "gui.app.ensure_agent_running",
+        lambda _settings: AgentConnection(reachable=True, handle=fake_handle),
+    )
 
     QTimer.singleShot(200, qapp.quit)
     run_gui(settings)
 
-    assert calls["wait"] == 3
     assert fake_handle.stopped is True
+
+
+def test_run_gui_does_not_touch_an_agent_it_did_not_start(
+    monkeypatch: pytest.MonkeyPatch, qapp: QApplication, tmp_path: Path
+) -> None:
+    """When ensure_agent_running() connects to an agent it didn't start
+    (handle=None) -- whether that's a pre-existing instance, or its own
+    internal race-recovery finding another instance won -- run_gui must
+    not try to stop anything on exit; there's nothing it owns."""
+    settings = _settings_with_port(tmp_path, 8788)
+
+    monkeypatch.setattr(
+        "gui.app.ensure_agent_running",
+        lambda _settings: AgentConnection(reachable=True, handle=None),
+    )
+
+    QTimer.singleShot(200, qapp.quit)
+    exit_code = run_gui(settings)  # must not raise
+
+    assert exit_code == 0
 
 
 def test_run_gui_connects_to_an_already_running_agent_instead_of_rebinding(
