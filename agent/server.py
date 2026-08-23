@@ -105,3 +105,51 @@ def wait_for_agent_ready(settings: Settings, timeout: float = 5.0) -> bool:
             pass
         time.sleep(0.1)
     return False
+
+
+@dataclass
+class AgentConnection:
+    """Result of ``ensure_agent_running``.
+
+    ``handle`` is only set when this call started a *new* agent this
+    process now owns (and is responsible for stopping); connecting to
+    one that was already running leaves it ``None`` on purpose, since
+    that agent belongs to whoever started it.
+    """
+
+    reachable: bool
+    handle: AgentHandle | None
+    error: str | None = None
+
+
+def ensure_agent_running(settings: Settings) -> AgentConnection:
+    """Connect to an already-running agent, or start one.
+
+    Shared by the GUI's startup sequence and its manual "Start Agent"
+    retry button, so both go through the exact same race-recovery and
+    failure-cleanup logic instead of two copies drifting apart.
+    """
+    if wait_for_agent_ready(settings, timeout=0.5):
+        return AgentConnection(reachable=True, handle=None)
+
+    handle = start_agent_in_background(settings)
+    if wait_for_agent_ready(settings, timeout=5.0):
+        return AgentConnection(reachable=True, handle=handle)
+
+    # The 0.5s check above isn't airtight: two callers racing (the
+    # installer's autostart entry vs. a manual launch, or this button
+    # racing a launch that's already in flight) can both see "nothing
+    # running yet" and both try to bind. Check once more for a winner
+    # before giving up.
+    if handle.error is not None:
+        _log.warning("This attempt's agent failed to start: %s", handle.error)
+    if wait_for_agent_ready(settings, timeout=2.0):
+        handle.stop()
+        return AgentConnection(reachable=True, handle=None)
+
+    error_text = str(handle.error) if handle.error is not None else "agent did not become ready in time"
+    # Stop the failed attempt rather than leaving it bound: a caller
+    # (the retry button, in particular) needs the port free again for
+    # its next attempt, not a zombie holding it.
+    handle.stop()
+    return AgentConnection(reachable=False, handle=None, error=error_text)

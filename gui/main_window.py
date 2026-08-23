@@ -61,7 +61,7 @@ class MainWindow(QMainWindow):
         for name, note in _NAV_SECTIONS:
             self._sidebar.addItem(QListWidgetItem(name))
             if name == "Dashboard":
-                self._stack.addWidget(DashboardPage(self._client, settings.data.resolved_log_dir()))
+                self._stack.addWidget(DashboardPage(self._client, settings))
             else:
                 self._stack.addWidget(PlaceholderPage(name, note or ""))
 

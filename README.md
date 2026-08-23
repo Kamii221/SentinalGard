@@ -167,6 +167,15 @@ socket) on Linux, where the bug doesn't reproduce in the first place
 (different default event loop) — the real test is on Windows, which is
 where a user actually hit this.
 
+**A manual "Start Agent" button** on the dashboard covers whatever's
+still left after all of the above: if the agent isn't reachable, the
+button shows up next to the status banner; clicking it re-runs the
+exact same connect-or-start sequence (`agent.server.ensure_agent_running`
+— now shared by the GUI's startup path and this button, instead of two
+copies of the same logic) on a background thread, and reports success
+or the specific failure reason directly in the dashboard, without
+needing to close and relaunch the whole app to retry.
+
 The small shield icon in the window titlebar, taskbar, and system tray
 (`gui/icon.py`) is drawn programmatically rather than loaded from a
 designed asset — there's no bundled graphic in the repo. The same
