@@ -53,7 +53,7 @@ def create_app(settings: Settings) -> FastAPI:
         network_monitor = NetworkMonitor(session_factory, settings.monitoring, settings.risk)
         persistence_monitor = PersistenceMonitor(session_factory, settings.monitoring, settings.risk)
         log_monitor = LogMonitor(session_factory, settings.monitoring, settings.risk)
-        correlation_monitor = CorrelationMonitor(session_factory, settings.monitoring, settings.risk)
+        correlation_monitor = CorrelationMonitor(session_factory, settings.monitoring, settings.risk, settings=settings)
         retention_monitor = RetentionMonitor(session_factory, settings.monitoring, settings.retention)
 
     @asynccontextmanager

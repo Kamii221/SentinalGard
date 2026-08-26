@@ -4,6 +4,7 @@
 # demonstrates escalating an already-flagged network event further).
 name: Outbound connection to a C2-associated port
 severity: high
+mitre_technique: T1071 # Command and Control: Application Layer Protocol
 conditions:
   event_type: network_connection
   indicators:

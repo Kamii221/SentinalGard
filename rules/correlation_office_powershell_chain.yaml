@@ -6,9 +6,16 @@
 #
 # Honest scope: this is time-window + process-name correlation, not
 # strict PID/causal lineage tracing (see
-# detection/correlation_engine.py for why). Each step just needs to
-# occur no earlier than the previous step's matched event, within
-# window_minutes of the first matched event.
+# detection/correlation_engine.py for why -- full causality across
+# every event type here would need deeper OS instrumentation this
+# project doesn't have). Each step just needs to occur no earlier than
+# the previous step's matched event, within window_minutes of the
+# first matched event.
+#
+# For the two event types that *do* carry a real pid
+# (process_create, network_connection), a tighter variant exists that
+# actually verifies same-process-lineage instead of just "same time
+# window": see lineage_office_powershell_network.yaml.
 name: Office document spawns PowerShell, then reaches out and persists
 severity: critical
 window_minutes: 15

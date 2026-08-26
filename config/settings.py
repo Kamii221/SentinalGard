@@ -156,6 +156,14 @@ class MonitoringConfig(BaseModel):
 class ResponseConfig(BaseModel):
     # None => <data_dir>/quarantine. See config.settings.resolved_quarantine_dir.
     quarantine_dir: Optional[str] = None
+    # Global kill switch for response/auto_response.py: even a rule
+    # with its own auto_response block configured does nothing while
+    # this is false. Off by default, matching the same
+    # avoid-aggressive-automatic-remediation default every response
+    # action has had since Phase 12 -- turning this on is an explicit,
+    # deliberate opt-in a user makes, not something a rule file alone
+    # can switch on.
+    auto_response_enabled: bool = False
 
 
 def resolved_quarantine_dir(settings: "Settings") -> Path:

@@ -128,3 +128,73 @@ def test_multiple_scenarios_do_not_double_use_the_same_event() -> None:
 
     matches = find_scenario_matches([scenario_a, scenario_b], [shared_event])
     assert len(matches) == 1  # only the first scenario gets the single available event
+
+
+def _lineage_scenario() -> CorrelationScenario:
+    return CorrelationScenario(
+        name="Office spawns PowerShell which phones home",
+        steps=[
+            CorrelationStep(event_types=["process_create"], process_contains=["winword.exe"], require_lineage=True),
+            CorrelationStep(event_types=["network_connection"], require_lineage=True),
+        ],
+    )
+
+
+def test_lineage_step_matches_a_true_descendant_process() -> None:
+    # winword.exe (pid 100) spawns powershell.exe (pid 200, ppid 100),
+    # which is the one that makes the network connection.
+    events = [
+        CorrelationEvent(1, "process_create", "winword.exe", _minutes(0), pid=100),
+        CorrelationEvent(2, "network_connection", "powershell.exe", _minutes(1), pid=200),
+    ]
+    ancestry = {100: None, 200: 100}
+    matches = find_scenario_matches([_lineage_scenario()], events, ancestry=ancestry)
+    assert len(matches) == 1
+    assert matches[0].matched_event_ids == [1, 2]
+
+
+def test_lineage_step_matches_a_multi_hop_descendant() -> None:
+    # winword.exe (100) -> powershell.exe (200) -> curl.exe (300), and
+    # curl.exe is the one that makes the connection -- lineage must
+    # walk two hops, not just one.
+    events = [
+        CorrelationEvent(1, "process_create", "winword.exe", _minutes(0), pid=100),
+        CorrelationEvent(2, "network_connection", "curl.exe", _minutes(1), pid=300),
+    ]
+    ancestry = {100: None, 200: 100, 300: 200}
+    matches = find_scenario_matches([_lineage_scenario()], events, ancestry=ancestry)
+    assert len(matches) == 1
+
+
+def test_lineage_step_rejects_an_unrelated_process() -> None:
+    # The network connection is from some other, unrelated process
+    # (pid 999, no ancestry link to 100) -- same event types and time
+    # window as a real match, but not the same lineage.
+    events = [
+        CorrelationEvent(1, "process_create", "winword.exe", _minutes(0), pid=100),
+        CorrelationEvent(2, "network_connection", "chrome.exe", _minutes(1), pid=999),
+    ]
+    ancestry = {100: None, 999: None}
+    matches = find_scenario_matches([_lineage_scenario()], events, ancestry=ancestry)
+    assert matches == []
+
+
+def test_lineage_step_rejects_an_event_with_no_pid() -> None:
+    events = [
+        CorrelationEvent(1, "process_create", "winword.exe", _minutes(0), pid=100),
+        CorrelationEvent(2, "network_connection", "powershell.exe", _minutes(1), pid=None),
+    ]
+    matches = find_scenario_matches([_lineage_scenario()], events, ancestry={100: None})
+    assert matches == []
+
+
+def test_lineage_scenario_without_an_ancestry_map_never_matches_the_second_step() -> None:
+    # Omitting `ancestry` entirely (its default) must not silently
+    # treat "unknown" as "descendant" -- it must simply never satisfy
+    # a require_lineage step past the anchor.
+    events = [
+        CorrelationEvent(1, "process_create", "winword.exe", _minutes(0), pid=100),
+        CorrelationEvent(2, "network_connection", "powershell.exe", _minutes(1), pid=200),
+    ]
+    matches = find_scenario_matches([_lineage_scenario()], events)
+    assert matches == []

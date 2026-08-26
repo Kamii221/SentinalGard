@@ -1,0 +1,22 @@
+# A tighter, lineage-verified variant of
+# correlation_office_powershell_chain.yaml, scoped to just the two
+# steps that carry a real OS pid (process_create, network_connection --
+# see monitors/process_monitor.py and monitors/network_monitor.py).
+# `require_lineage: true` means the network connection's step must be
+# satisfied by the *same process* the Office document spawned, or a
+# descendant of it (walked via real PID/PPID ancestry against
+# ProcessRecord rows), not just any network connection that happens to
+# occur in the same time window -- see detection/correlation_engine.py
+# for how the ancestry walk works, and why this can't (yet) extend to
+# file_created/persistence_new, which aren't currently attributed to a
+# pid by their monitors.
+name: Office document spawns PowerShell that phones home (lineage-verified)
+severity: critical
+window_minutes: 10
+mitre_technique: T1566.001 # Phishing: Spearphishing Attachment
+steps:
+  - event_types: [process_create]
+    process_contains: [winword.exe, excel.exe, powerpnt.exe, outlook.exe]
+    require_lineage: true
+  - event_types: [network_connection]
+    require_lineage: true

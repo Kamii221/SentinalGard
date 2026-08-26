@@ -4,10 +4,10 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
-from config.settings import MonitoringConfig, RiskConfig
+from config.settings import MonitoringConfig, RiskConfig, load_settings
 from database.engine import create_db_engine, create_session_factory
-from database.models import Alert, Base, Event, Incident
-from detection.rules_loader import ConditionRule, CorrelationScenario, CorrelationStep, RuleConditions
+from database.models import Alert, Base, Event, Incident, ProcessRecord
+from detection.rules_loader import AutoResponseAction, ConditionRule, CorrelationScenario, CorrelationStep, RuleConditions
 from monitors.correlation_monitor import CorrelationMonitor
 
 RISK = RiskConfig()
@@ -229,3 +229,118 @@ def test_correlation_monitor_end_to_end_with_real_thread(tmp_path: Path) -> None
         assert found, "expected the rule match to produce an alert"
     finally:
         monitor.stop()
+
+
+def _lineage_scenario() -> CorrelationScenario:
+    return CorrelationScenario(
+        name="Office spawns PowerShell which phones home",
+        severity="critical",
+        steps=[
+            CorrelationStep(event_types=["process_create"], process_contains=["winword.exe"], require_lineage=True),
+            CorrelationStep(event_types=["network_connection"], require_lineage=True),
+        ],
+    )
+
+
+def test_lineage_scenario_matches_a_real_descendant_process(session_factory) -> None:
+    with session_factory() as session:
+        session.add_all(
+            [
+                ProcessRecord(pid=100, ppid=1, name="winword.exe"),
+                ProcessRecord(pid=200, ppid=100, name="powershell.exe"),
+                Event(
+                    event_type="process_create", source="process_monitor", process="winword.exe",
+                    severity="informational", risk_score=0, details={"pid": 100, "ppid": 1},
+                ),
+                Event(
+                    event_type="network_connection", source="network_monitor", process="powershell.exe",
+                    severity="low", risk_score=10, details={"pid": 200},
+                ),
+            ]
+        )
+        session.commit()
+
+    monitor = CorrelationMonitor(
+        session_factory, MonitoringConfig(), RISK, condition_rules=[], scenarios=[_lineage_scenario()]
+    )
+    with session_factory() as session:
+        monitor._run_correlation(session)
+        session.commit()
+        assert len(session.execute(select(Incident)).scalars().all()) == 1
+
+
+def test_lineage_scenario_rejects_an_unrelated_process(session_factory) -> None:
+    """Same event types, same time window, same process names even --
+    but the network connection's pid has no ancestry link to the
+    Office process, so this must not match."""
+    with session_factory() as session:
+        session.add_all(
+            [
+                ProcessRecord(pid=100, ppid=1, name="winword.exe"),
+                ProcessRecord(pid=999, ppid=1, name="powershell.exe"),  # unrelated, own parent
+                Event(
+                    event_type="process_create", source="process_monitor", process="winword.exe",
+                    severity="informational", risk_score=0, details={"pid": 100, "ppid": 1},
+                ),
+                Event(
+                    event_type="network_connection", source="network_monitor", process="powershell.exe",
+                    severity="low", risk_score=10, details={"pid": 999},
+                ),
+            ]
+        )
+        session.commit()
+
+    monitor = CorrelationMonitor(
+        session_factory, MonitoringConfig(), RISK, condition_rules=[], scenarios=[_lineage_scenario()]
+    )
+    with session_factory() as session:
+        monitor._run_correlation(session)
+        session.commit()
+        assert session.execute(select(Incident)).scalars().all() == []
+
+
+def test_condition_rule_auto_response_is_wired_up(session_factory, tmp_path: Path) -> None:
+    """End-to-end through the real monitor (not just the standalone
+    maybe_auto_respond unit tests in tests/test_auto_response.py):
+    a rule with an auto_response block, matched while the global
+    switch is on, must actually kill the process."""
+    import subprocess
+    import sys
+
+    import psutil
+
+    settings = load_settings()
+    settings.data.data_dir = tmp_path
+    settings.response.auto_response_enabled = True
+
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    time.sleep(0.3)
+    try:
+        rule = ConditionRule(
+            name="Auto-kill suspicious powershell",
+            severity="critical",
+            conditions=RuleConditions(event_type="process_create", process="powershell.exe"),
+            auto_response=AutoResponseAction(action="kill_process", min_severity="critical"),
+        )
+        with session_factory() as session:
+            session.add(
+                Event(
+                    event_type="process_create", source="process_monitor", process="powershell.exe",
+                    severity="critical", risk_score=90, details={"pid": proc.pid},
+                )
+            )
+            session.commit()
+
+        monitor = CorrelationMonitor(
+            session_factory, MonitoringConfig(), RISK, condition_rules=[rule], scenarios=[], settings=settings
+        )
+        monitor._last_event_id = 0
+        with session_factory() as session:
+            monitor._run_condition_rules(session)
+            session.commit()
+
+        assert not psutil.pid_exists(proc.pid)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=3)
