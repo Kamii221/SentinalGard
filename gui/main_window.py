@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from config.settings import Settings
+from gui.agent_controller import AgentController
 from gui.api_client import AgentClient
 from gui.icon import build_app_icon
 from gui.pages.dashboard import DashboardPage
@@ -37,10 +38,17 @@ _NAV_SECTIONS: list[tuple[str, str | None]] = [
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, settings: Settings, minimize_to_tray: bool = False) -> None:
+    def __init__(
+        self, settings: Settings, controller: AgentController | None = None, minimize_to_tray: bool = False
+    ) -> None:
         super().__init__()
         self._settings = settings
         self._client = AgentClient(settings)
+        # Callers that don't care about Start/Stop wiring (most tests)
+        # can omit this -- an unstarted controller is a safe default,
+        # the dashboard just shows whatever DashboardPage's own status
+        # polling already finds.
+        self._controller = controller if controller is not None else AgentController(settings)
         # When a tray icon is available, closing the window (the titlebar
         # X) should just hide it -- monitoring keeps running in the
         # background and the dashboard reopens from the tray. Without a
@@ -61,7 +69,7 @@ class MainWindow(QMainWindow):
         for name, note in _NAV_SECTIONS:
             self._sidebar.addItem(QListWidgetItem(name))
             if name == "Dashboard":
-                self._stack.addWidget(DashboardPage(self._client, settings))
+                self._stack.addWidget(DashboardPage(self._client, settings, self._controller))
             else:
                 self._stack.addWidget(PlaceholderPage(name, note or ""))
 

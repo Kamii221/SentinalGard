@@ -7,8 +7,8 @@ import sys
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from agent.logging_setup import get_logger
-from agent.server import ensure_agent_running
 from config.settings import Settings
+from gui.agent_controller import AgentController
 from gui.main_window import MainWindow
 from gui.theme import DARK_STYLESHEET
 from gui.tray import install_tray_icon
@@ -19,12 +19,12 @@ _log = get_logger("gui")
 def run_gui(settings: Settings, start_minimized: bool = False) -> int:
     # A previous launch (the installer's "start with Windows" shortcut,
     # an already-open window, a `--serve` instance, ...) may already have
-    # the agent bound to this port -- ensure_agent_running connects to it
-    # instead of racing it to bind again. If nothing's reachable, the
-    # dashboard's own "Start Agent" button (gui/pages/dashboard.py) can
-    # retry the same way without restarting the whole app.
-    connection = ensure_agent_running(settings)
-    agent_handle = connection.handle
+    # the agent bound to this port -- the controller connects to it
+    # instead of racing it to bind again. Whatever happens here, the
+    # dashboard's Start/Stop buttons operate on this same controller for
+    # the rest of the window's life.
+    controller = AgentController(settings)
+    connection = controller.start()
     if connection.reachable:
         _log.info("Connected to agent on %s:%d", settings.api.host, settings.api.port)
     else:
@@ -44,7 +44,7 @@ def run_gui(settings: Settings, start_minimized: bool = False) -> int:
         # closes -- defeating the point of minimizing to the tray.
         app.setQuitOnLastWindowClosed(False)
 
-    window = MainWindow(settings, minimize_to_tray=tray_available)
+    window = MainWindow(settings, controller, minimize_to_tray=tray_available)
 
     if tray_available:
         tray = install_tray_icon(app, window)
@@ -58,9 +58,13 @@ def run_gui(settings: Settings, start_minimized: bool = False) -> int:
 
     if tray is not None:
         tray.hide()
-    if agent_handle is not None:
-        _log.info("GUI closed; stopping the agent it started")
-        agent_handle.stop()
+    # Reflects whatever the dashboard's Start/Stop buttons did during
+    # the session -- if the user already clicked Stop, controller.handle
+    # is already None and this is a no-op; if they clicked Start after
+    # an initial failure, this stops what that click started.
+    if controller.owns_agent:
+        _log.info("GUI closed; stopping the agent")
+        controller.stop()
     else:
-        _log.info("GUI closed; leaving the agent it connected to (but didn't start) running")
+        _log.info("GUI closed; leaving any agent it's connected to (but doesn't own) running")
     return exit_code
