@@ -167,14 +167,28 @@ socket) on Linux, where the bug doesn't reproduce in the first place
 (different default event loop) — the real test is on Windows, which is
 where a user actually hit this.
 
-**A manual "Start Agent" button** on the dashboard covers whatever's
-still left after all of the above: if the agent isn't reachable, the
-button shows up next to the status banner; clicking it re-runs the
-exact same connect-or-start sequence (`agent.server.ensure_agent_running`
-— now shared by the GUI's startup path and this button, instead of two
-copies of the same logic) on a background thread, and reports success
-or the specific failure reason directly in the dashboard, without
-needing to close and relaunch the whole app to retry.
+**Start Agent / Stop Agent buttons** sit next to the dashboard's status
+banner, always visible, enabled or disabled based on current state
+rather than shown/hidden. `gui/agent_controller.py`'s `AgentController`
+is the single source of truth both buttons and `run_gui`'s own startup/
+shutdown share, so a Stop click, an auto-start at launch, and the
+window closing can never disagree about who's responsible for stopping
+what:
+
+* **Start** is enabled whenever the agent isn't reachable. Clicking it
+  runs the same connect-or-start-with-race-recovery sequence
+  (`agent.server.ensure_agent_running`) on a background thread, and
+  reports success or the specific failure reason directly in the
+  dashboard — no need to close and relaunch the whole app to retry.
+* **Stop** is enabled only when *this window's own controller* started
+  the agent it's connected to (`controller.owns_agent`) — not just
+  whenever one happens to be reachable. There's no way to stop an
+  agent this process didn't start a handle for (e.g. one already
+  running before the window opened, from a `--serve` instance or
+  another launch), so Stop stays disabled rather than pretending to
+  support that. After a deliberate Stop, the banner reads "Agent
+  stopped" rather than the "unreachable" wording an unexplained
+  failure gets — those are different situations and look different.
 
 The small shield icon in the window titlebar, taskbar, and system tray
 (`gui/icon.py`) is drawn programmatically rather than loaded from a

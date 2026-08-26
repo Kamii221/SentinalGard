@@ -6,7 +6,6 @@ from PySide6.QtCore import QTimer
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QApplication
 
-import gui.pages.dashboard as dashboard_module
 from agent.server import AgentConnection, start_agent_in_background, wait_for_agent_ready
 from config.settings import load_settings
 from gui.app import run_gui
@@ -47,6 +46,8 @@ def test_dashboard_shows_disconnected_state_without_agent(qapp: QApplication, tm
 
     dashboard = window._stack.widget(0)
     assert "unreachable" in dashboard._status_label.text().lower()
+    assert dashboard._start_button.isEnabled()
+    assert not dashboard._stop_button.isEnabled()
 
 
 def test_dashboard_reflects_live_agent_status(tmp_path: Path, qapp: QApplication) -> None:
@@ -60,53 +61,82 @@ def test_dashboard_reflects_live_agent_status(tmp_path: Path, qapp: QApplication
 
         assert "ACTIVE" in dashboard._status_label.text()
         assert dashboard._cards["websites_scanned"]._value_label.text() == "0"
+        assert not dashboard._start_button.isEnabled()
+        # This window's own controller didn't start the agent (it was
+        # started directly, above, before MainWindow even existed) --
+        # Stop must stay disabled, same as
+        # test_stop_button_disabled_when_connected_to_an_agent_we_did_not_start.
+        assert not dashboard._stop_button.isEnabled()
     finally:
         handle.stop()
 
 
-def test_start_agent_button_starts_the_agent_and_refreshes(
-    monkeypatch: pytest.MonkeyPatch, qapp: QApplication, tmp_path: Path
-) -> None:
-    """Real end-to-end exercise of the manual retry button: nothing is
-    running when the window opens (so the button is visible), clicking
-    it must actually start the agent on a background thread, and the
-    dashboard must pick up the result via the Qt signal without the
-    caller needing to pump anything but the event loop."""
+def _wait_until_not_busy(dashboard, qapp: QApplication, timeout: float = 10.0) -> None:
+    deadline = time.monotonic() + timeout
+    while dashboard._busy and time.monotonic() < deadline:
+        qapp.processEvents()
+        time.sleep(0.05)
+
+
+def test_start_agent_button_starts_the_agent_and_refreshes(qapp: QApplication, tmp_path: Path) -> None:
+    """Real end-to-end exercise of the Start button: nothing is running
+    when the window opens, clicking Start must actually start the
+    agent on a background thread via the shared AgentController, and
+    the dashboard must pick up the result via the Qt signal without
+    the caller needing to pump anything but the event loop."""
     settings = _settings_with_port(tmp_path, 8787)
     window = MainWindow(settings)
     dashboard = window._stack.widget(0)
-    assert not dashboard._start_button.isHidden()
-
-    # Spy on the real ensure_agent_running so the test can stop whatever
-    # agent the button actually starts, without faking the button's own
-    # threading/signal wiring.
-    real_ensure_agent_running = dashboard_module.ensure_agent_running
-    started = {}
-
-    def _spy(settings_: object):
-        result = real_ensure_agent_running(settings_)
-        started["result"] = result
-        return result
-
-    monkeypatch.setattr(dashboard_module, "ensure_agent_running", _spy)
+    assert dashboard._start_button.isEnabled()
 
     try:
         dashboard._start_agent()
-        assert dashboard._starting is True
+        assert dashboard._busy is True
 
-        deadline = time.monotonic() + 10.0
-        while dashboard._starting and time.monotonic() < deadline:
-            qapp.processEvents()
-            time.sleep(0.05)
+        _wait_until_not_busy(dashboard, qapp)
 
-        assert "result" in started
-        assert started["result"].reachable is True
+        assert dashboard._controller.reachable is True
         assert "ACTIVE" in dashboard._status_label.text()
-        assert dashboard._start_button.isHidden()
+        assert not dashboard._start_button.isEnabled()
+        assert dashboard._stop_button.isEnabled()
     finally:
-        handle = started.get("result").handle if started.get("result") else None
-        if handle is not None:
-            handle.stop()
+        dashboard._controller.stop()
+
+
+def test_stop_agent_button_stops_the_agent_it_started(qapp: QApplication, tmp_path: Path) -> None:
+    settings = _settings_with_port(tmp_path, 8786)
+    window = MainWindow(settings)
+    dashboard = window._stack.widget(0)
+
+    dashboard._start_agent()
+    _wait_until_not_busy(dashboard, qapp)
+    assert dashboard._controller.owns_agent
+
+    dashboard._stop_agent()
+    assert dashboard._busy is True
+    _wait_until_not_busy(dashboard, qapp)
+
+    assert not dashboard._controller.owns_agent
+    assert not wait_for_agent_ready(settings, timeout=1.0)
+    assert "stopped" in dashboard._status_label.text().lower()
+    assert dashboard._start_button.isEnabled()
+    assert not dashboard._stop_button.isEnabled()
+
+
+def test_stop_button_disabled_when_connected_to_an_agent_we_did_not_start(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    settings = _settings_with_port(tmp_path, 8785)
+    handle = start_agent_in_background(settings)
+    try:
+        assert wait_for_agent_ready(settings, timeout=5.0)
+        window = MainWindow(settings)  # connects via its own controller, doesn't start one
+        dashboard = window._stack.widget(0)
+
+        assert not dashboard._controller.owns_agent
+        assert not dashboard._stop_button.isEnabled()
+    finally:
+        handle.stop()
 
 
 def test_close_event_ignored_and_hides_window_when_minimized_to_tray(qapp: QApplication, tmp_path: Path) -> None:
@@ -134,8 +164,8 @@ def test_close_event_accepted_without_tray(qapp: QApplication, tmp_path: Path) -
 def test_run_gui_stops_the_agent_it_started(
     monkeypatch: pytest.MonkeyPatch, qapp: QApplication, tmp_path: Path
 ) -> None:
-    """run_gui owns the handle ensure_agent_running() started for it,
-    so closing the window must stop that agent."""
+    """run_gui's AgentController owns the handle it started for it, so
+    closing the window must stop that agent."""
     settings = _settings_with_port(tmp_path, 8789)
 
     class FakeHandle:
@@ -147,7 +177,7 @@ def test_run_gui_stops_the_agent_it_started(
 
     fake_handle = FakeHandle()
     monkeypatch.setattr(
-        "gui.app.ensure_agent_running",
+        "gui.agent_controller.ensure_agent_running",
         lambda _settings: AgentConnection(reachable=True, handle=fake_handle),
     )
 
@@ -160,14 +190,14 @@ def test_run_gui_stops_the_agent_it_started(
 def test_run_gui_does_not_touch_an_agent_it_did_not_start(
     monkeypatch: pytest.MonkeyPatch, qapp: QApplication, tmp_path: Path
 ) -> None:
-    """When ensure_agent_running() connects to an agent it didn't start
-    (handle=None) -- whether that's a pre-existing instance, or its own
-    internal race-recovery finding another instance won -- run_gui must
-    not try to stop anything on exit; there's nothing it owns."""
+    """When the controller connects to an agent it didn't start
+    (handle=None) -- whether that's a pre-existing instance, or its
+    own internal race-recovery finding another instance won -- run_gui
+    must not try to stop anything on exit; there's nothing it owns."""
     settings = _settings_with_port(tmp_path, 8788)
 
     monkeypatch.setattr(
-        "gui.app.ensure_agent_running",
+        "gui.agent_controller.ensure_agent_running",
         lambda _settings: AgentConnection(reachable=True, handle=None),
     )
 
