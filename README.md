@@ -555,22 +555,25 @@ present:
   event into **one** `Incident` row (not five separate alerts) plus
   one `Alert` pointing at it.
 
-  **Honest scope**: this is time-window + process-name-substring
+  **Baseline scope**: this is time-window + process-name-substring
   correlation, not strict PID/causal lineage tracing. Reliably proving
   "this exact PowerShell process is a child of this exact Word
-  process, and this exact file write came from that PowerShell
-  process" needs deeper OS instrumentation (a filesystem minifilter
-  driver, ETW process-correlated file events) that's out of scope for
-  a dependency-light v1. Documented directly in
-  `detection/correlation_engine.py`.
+  process" for arbitrary event types needs deeper OS instrumentation
+  (a filesystem minifilter driver, ETW process-correlated file events)
+  that's out of scope for a dependency-light v1 — but for the two event
+  types that *do* carry a real OS pid, real lineage verification is
+  available as an opt-in per-step flag; see "Advanced detection &
+  automated response" below.
 
-Six starter rule files ship in `rules/`, one per spec-listed rule
+Eight starter rule files ship in `rules/`: one per spec-listed rule
 type plus the correlation example above (`suspicious_powershell.yaml`,
 `persistence_from_temp.yaml`, `network_c2_port.yaml`,
 `executable_double_extension.yaml`, `defender_detection.yaml`,
-`correlation_office_powershell_chain.yaml`) — illustrative starting
-points, not exhaustive threat intel, same spirit as Phase 7's bundled
-YARA rules.
+`correlation_office_powershell_chain.yaml`), plus the lineage and
+auto-response examples added below
+(`lineage_office_powershell_network.yaml`,
+`auto_response_example.yaml`) — illustrative starting points, not
+exhaustive threat intel, same spirit as Phase 7's bundled YARA rules.
 
 **Where it runs**: `monitors/correlation_monitor.py` is a background
 worker unlike every other monitor — it doesn't observe the OS, it
@@ -600,7 +603,81 @@ data.
 No automatic remediation happens here — matching an alert/incident
 never kills a process, quarantines a file, or blocks anything by
 itself. That's Phase 12's job, and the spec is explicit that it needs
-its own confirmation step.
+its own confirmation step. (A later, strictly opt-in exception exists —
+see "Advanced detection & automated response" below — but the default
+for every rule, and the agent as a whole, remains fully manual.)
+
+### Advanced detection & automated response
+
+Two extensions on top of Phase 11, both additive — no existing rule's
+behavior changes unless it explicitly opts in.
+
+**Real process-lineage correlation.** A correlation step can set
+`require_lineage: true`. The first such step in a scenario anchors a
+"root" process; every later `require_lineage` step's candidate event
+must be that same process, or a real descendant of it, walked via
+actual PID/PPID ancestry (`detection/correlation_engine.py`'s
+`is_descendant`) — not just "some event of the right type, somewhere
+in the time window," which is all the baseline correlation checks.
+This only works for event types that carry a real pid in their
+`details` — currently `process_create` (which also carries `ppid`) and
+`network_connection` (`monitors/process_monitor.py`,
+`monitors/network_monitor.py`) — so a lineage step can never match
+`file_created` or `persistence_new`, which aren't pid-attributed by
+their monitors. `rules/lineage_office_powershell_network.yaml` is a
+lineage-verified rewrite of the Phase 11 Office→PowerShell→network
+example, scoped to just those two steps.
+
+**MITRE ATT&CK tagging.** Both rule shapes accept an optional
+`mitre_technique` field (e.g. `T1059.001`) — purely informational,
+carried through into the resulting `Alert`'s `details` for
+analyst-facing categorization, not matched against anything. Applied
+to the rules where a single technique cleanly fits
+(`suspicious_powershell.yaml`, `executable_double_extension.yaml`,
+`network_c2_port.yaml`, the two new files above); deliberately *not*
+forced onto rules spanning several techniques at once
+(`persistence_from_temp.yaml` covers Run keys, services, *and*
+scheduled tasks — three different technique IDs) or ones that aren't
+really about a technique at all (`defender_detection.yaml` is just
+escalating Defender's own verdict).
+
+**Opt-in automatic response** (`response/auto_response.py`). Every
+response action (kill-process, quarantine-file, disable-persistence)
+has been purely manual, API-triggered-with-`confirm:true`, since Phase
+12 — "avoid aggressive automatic remediation in v1." This adds a
+policy layer *on top* of that default without weakening it: a
+condition rule can carry an `auto_response` block —
+
+```yaml
+name: Encoded PowerShell (auto-kill example)
+severity: high
+enabled: false
+conditions:
+  process: powershell.exe
+  indicators: [encodedcommand]
+auto_response:
+  action: kill_process       # or quarantine_file / disable_persistence
+  min_severity: critical     # extra gate above the rule's own severity
+```
+
+— but it does nothing unless **both** are true: the rule itself is
+`enabled`, *and* `response.auto_response_enabled` (`config/default_config.yaml`
+or your own config, default `false`) is turned on globally. No rule
+file, on its own, can ever make the agent start taking automatic
+action; the global switch is a separate, deliberate opt-in. When both
+gates are open and a match's severity clears `min_severity`, the
+matched event's own `details` supply the action's parameters (`pid`
+for kill, `path` for quarantine, `source_type`/`location`/`name` for
+disable-persistence) — every attempt, success or failure, is logged
+exactly like a manual action (`agent/audit.py` + an `Event` tagged
+`source="auto_response"`), so it's distinguishable from a
+human-initiated action in the audit trail. A failure (missing pid,
+access denied, file already gone, …) is logged and swallowed — this
+runs inside the correlation monitor's poll loop, and one bad match must
+never take the whole monitor down.
+`rules/auto_response_example.yaml` ships with `enabled: false`, so
+installing it changes nothing until you deliberately flip both
+switches.
 
 ### Quarantine + response actions (Phase 12)
 

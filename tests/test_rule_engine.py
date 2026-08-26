@@ -62,6 +62,77 @@ def test_load_rules_distinguishes_scenarios_from_condition_rules(tmp_path: Path)
     assert scenarios[0].name == "A Chain"
 
 
+def test_load_rules_parses_mitre_technique_and_auto_response(tmp_path: Path) -> None:
+    (tmp_path / "tagged.yaml").write_text(
+        "name: Tagged Rule\n"
+        "severity: critical\n"
+        "mitre_technique: T1059.001\n"
+        "conditions:\n"
+        "  process: powershell.exe\n"
+        "auto_response:\n"
+        "  action: kill_process\n"
+        "  min_severity: critical\n",
+        encoding="utf-8",
+    )
+    rules, _ = load_rules(tmp_path)
+    assert len(rules) == 1
+    rule = rules[0]
+    assert rule.mitre_technique == "T1059.001"
+    assert rule.auto_response is not None
+    assert rule.auto_response.action == "kill_process"
+    assert rule.auto_response.min_severity == "critical"
+
+
+def test_load_rules_auto_response_defaults_to_none(tmp_path: Path) -> None:
+    (tmp_path / "untagged.yaml").write_text(
+        "name: Untagged Rule\nseverity: low\nconditions:\n  process: cmd.exe\n", encoding="utf-8"
+    )
+    rules, _ = load_rules(tmp_path)
+    assert rules[0].mitre_technique is None
+    assert rules[0].auto_response is None
+
+
+def test_load_rules_rejects_unknown_auto_response_action(tmp_path: Path) -> None:
+    (tmp_path / "bad_action.yaml").write_text(
+        "name: Bad Action\n"
+        "severity: critical\n"
+        "conditions:\n  process: powershell.exe\n"
+        "auto_response:\n  action: format_disk\n",
+        encoding="utf-8",
+    )
+    rules, _ = load_rules(tmp_path)
+    assert rules == []  # invalid rule file is skipped, not raised
+
+
+def test_load_rules_parses_require_lineage_on_scenario_steps(tmp_path: Path) -> None:
+    (tmp_path / "lineage.yaml").write_text(
+        "name: Lineage Chain\n"
+        "severity: critical\n"
+        "mitre_technique: T1566.001\n"
+        "steps:\n"
+        "  - event_types: [process_create]\n"
+        "    process_contains: [winword.exe]\n"
+        "    require_lineage: true\n"
+        "  - event_types: [network_connection]\n"
+        "    require_lineage: true\n",
+        encoding="utf-8",
+    )
+    _, scenarios = load_rules(tmp_path)
+    assert len(scenarios) == 1
+    scenario = scenarios[0]
+    assert scenario.mitre_technique == "T1566.001"
+    assert scenario.steps[0].require_lineage is True
+    assert scenario.steps[1].require_lineage is True
+
+
+def test_require_lineage_defaults_to_false(tmp_path: Path) -> None:
+    (tmp_path / "no_lineage.yaml").write_text(
+        "name: No Lineage\nsteps:\n  - event_types: [process_create]\n", encoding="utf-8"
+    )
+    _, scenarios = load_rules(tmp_path)
+    assert scenarios[0].steps[0].require_lineage is False
+
+
 # --- Condition rule matching -----------------------------------------------
 
 

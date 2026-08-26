@@ -1,0 +1,33 @@
+# EXAMPLE, disabled by default -- demonstrates response/auto_response.py's
+# opt-in automatic remediation. This rule alone doing nothing is
+# deliberate and layered:
+#
+#   1. `enabled: false` here means this specific rule never loads at
+#      all until you flip it to true.
+#   2. Even then, `response.auto_response_enabled: false`
+#      (config/default_config.yaml, or your own config.yaml) is a
+#      second, global switch that has to be turned on separately --
+#      no single rule file can make the agent start taking automatic
+#      action by itself.
+#
+# `auto_response.action` is one of kill_process / quarantine_file /
+# disable_persistence (see response/actions.py); `min_severity` is an
+# extra gate on top of this rule's own `severity`, letting a rule alert
+# at a lower bar than the one that triggers automatic remediation.
+#
+# This example: an encoded/obfuscated PowerShell command is enough to
+# alert at "high", but only actually gets auto-killed if it also
+# clears "critical" -- copy this pattern rather than editing this file
+# in place if you want your own auto-response rules.
+name: Encoded PowerShell (auto-kill example)
+severity: high
+enabled: false
+conditions:
+  event_type: process_create
+  process: powershell.exe
+  indicators:
+    - encodedcommand
+mitre_technique: T1059.001 # Command and Scripting Interpreter: PowerShell
+auto_response:
+  action: kill_process
+  min_severity: critical

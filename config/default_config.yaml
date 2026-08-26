@@ -55,3 +55,8 @@ monitoring:
 
 response:
   quarantine_dir: null
+  # Off by default. See config/settings.py's ResponseConfig and
+  # response/auto_response.py -- even with this on, a specific rule
+  # only auto-responds if its own rules/*.yaml entry has an
+  # auto_response block.
+  auto_response_enabled: false

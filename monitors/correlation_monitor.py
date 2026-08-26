@@ -35,12 +35,20 @@ from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 from agent.logging_setup import get_logger
-from config.settings import MonitoringConfig, RiskConfig
-from database.models import Alert, Event, Incident
+from config.settings import MonitoringConfig, RiskConfig, Settings
+from database.models import Alert, Event, Incident, ProcessRecord
 from detection.correlation_engine import CorrelationEvent, find_scenario_matches
 from detection.risk import severity_floor
 from detection.rule_engine import evaluate_condition_rules
 from detection.rules_loader import ConditionRule, CorrelationScenario, load_rules
+
+# Imported lazily inside _run_condition_rules, not here: response.actions
+# imports monitors.hashing, which -- via monitors/__init__.py -- imports
+# this module back, so a top-level import here would be a circular
+# import (response.auto_response -> response.actions -> monitors.hashing
+# -> monitors/__init__.py -> monitors.correlation_monitor -> back here).
+# By the time _run_condition_rules actually runs, every module involved
+# has already finished loading, so the cycle never triggers.
 
 _log = get_logger("monitors.correlation")
 
@@ -59,10 +67,16 @@ class CorrelationMonitor:
         risk_config: RiskConfig,
         condition_rules: list[ConditionRule] | None = None,
         scenarios: list[CorrelationScenario] | None = None,
+        settings: Settings | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._config = monitoring_config
         self._risk_config = risk_config
+        # Only needed for auto-response (resolving the quarantine dir,
+        # checking the global auto_response_enabled switch); every
+        # existing caller that doesn't pass it just gets auto-response
+        # as a permanent no-op, same as the switch being off.
+        self._settings = settings
 
         if condition_rules is None or scenarios is None:
             loaded_rules, loaded_scenarios = load_rules()
@@ -143,6 +157,9 @@ class CorrelationMonitor:
             for match in matches:
                 severity = _max_severity(event.severity, match.rule.severity)
                 risk = max(event.risk_score, severity_floor(match.rule.severity, self._risk_config))
+                alert_details = {"event_id": event.id, "rule_file": match.rule.source_file, "reason": match.reason}
+                if match.rule.mitre_technique:
+                    alert_details["mitre_technique"] = match.rule.mitre_technique
                 session.add(
                     Alert(
                         title=match.rule.name,
@@ -151,9 +168,19 @@ class CorrelationMonitor:
                         risk_score=risk,
                         event_type=event.event_type,
                         source="rule_engine",
-                        details={"event_id": event.id, "rule_file": match.rule.source_file, "reason": match.reason},
+                        details=alert_details,
                     )
                 )
+                if match.rule.auto_response is not None:
+                    from response.auto_response import maybe_auto_respond
+
+                    maybe_auto_respond(
+                        session,
+                        rule=match.rule,
+                        event=event,
+                        alert_severity=severity,
+                        settings=self._settings,
+                    )
             self._last_event_id = event.id
 
     def _run_correlation(self, session) -> None:
@@ -164,11 +191,26 @@ class CorrelationMonitor:
 
         recent = session.execute(select(Event).where(Event.timestamp >= window_start)).scalars().all()
         correlation_events = [
-            CorrelationEvent(id=e.id, event_type=e.event_type, process=e.process, timestamp=e.timestamp)
+            CorrelationEvent(
+                id=e.id,
+                event_type=e.event_type,
+                process=e.process,
+                timestamp=e.timestamp,
+                pid=e.details.get("pid") if isinstance(e.details, dict) else None,
+            )
             for e in recent
         ]
 
-        matches = find_scenario_matches(self._scenarios, correlation_events, self._correlated_event_ids)
+        # Ancestry is only meaningful (and only worth a query) when at
+        # least one loaded scenario actually asks for it.
+        ancestry: dict[int, int | None] = {}
+        if any(step.require_lineage for scenario in self._scenarios for step in scenario.steps):
+            rows = session.execute(
+                select(ProcessRecord.pid, ProcessRecord.ppid).where(ProcessRecord.timestamp >= window_start)
+            ).all()
+            ancestry = {pid: ppid for pid, ppid in rows}
+
+        matches = find_scenario_matches(self._scenarios, correlation_events, self._correlated_event_ids, ancestry)
         if not matches:
             return
 
@@ -191,6 +233,13 @@ class CorrelationMonitor:
             session.add(incident)
             session.flush()  # assign incident.id before referencing it
 
+            alert_details = {
+                "incident_id": incident.id,
+                "scenario_file": match.scenario.source_file,
+                "matched_event_ids": match.matched_event_ids,
+            }
+            if match.scenario.mitre_technique:
+                alert_details["mitre_technique"] = match.scenario.mitre_technique
             session.add(
                 Alert(
                     title=f"Incident: {match.scenario.name}",
@@ -199,10 +248,6 @@ class CorrelationMonitor:
                     risk_score=risk,
                     event_type="incident",
                     source="correlation_engine",
-                    details={
-                        "incident_id": incident.id,
-                        "scenario_file": match.scenario.source_file,
-                        "matched_event_ids": match.matched_event_ids,
-                    },
+                    details=alert_details,
                 )
             )

@@ -4,6 +4,7 @@
 # produces an alert regardless of the base heuristic score.
 name: Executable disguised as a document
 severity: high
+mitre_technique: T1036.007 # Masquerading: Double File Extension
 conditions:
   event_type:
     - file_created

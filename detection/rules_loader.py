@@ -60,11 +60,33 @@ _log = get_logger("detection.rules")
 Severity = Literal["informational", "low", "medium", "high", "critical"]
 
 
+class AutoResponseAction(BaseModel):
+    """Opt-in automatic remediation for a condition rule match.
+
+    Off by default at two levels, deliberately: this field is absent
+    unless a rule author explicitly adds it, *and*
+    ``response.auto_response_enabled`` (config/settings.py) has to be
+    turned on globally before any rule's ``auto_response`` block does
+    anything -- a rule file alone can never make the agent start taking
+    destructive action. ``min_severity`` is an extra gate on top of the
+    rule's own severity, so a rule can fire (and alert) at a lower bar
+    than the one that triggers automatic remediation.
+    """
+
+    action: Literal["kill_process", "quarantine_file", "disable_persistence"]
+    min_severity: Severity = "critical"
+
+
 class ConditionRule(BaseModel):
     name: str
     severity: Severity = "medium"
     enabled: bool = True
     conditions: "RuleConditions"
+    # Purely informational tag (e.g. "T1059.001") surfaced in the
+    # resulting Alert's details -- not matched against, just carried
+    # through for analyst-facing categorization.
+    mitre_technique: str | None = None
+    auto_response: AutoResponseAction | None = None
     source_file: str = ""
 
 
@@ -86,6 +108,17 @@ ConditionRule.model_rebuild()
 class CorrelationStep(BaseModel):
     event_types: list[str] = Field(min_length=1)
     process_contains: list[str] = Field(default_factory=list)
+    # Opt-in tightening beyond time-window + name-substring matching
+    # (see detection/correlation_engine.py's module docstring for why
+    # that's the scenario-wide default): when true, this step's
+    # candidate event must be the *same process lineage* as the first
+    # require_lineage step in the scenario -- the same process, or a
+    # descendant of it, per real PID/PPID ancestry -- not just "some
+    # event of the right type and name, anywhere in the time window."
+    # Only meaningful for event types that carry a `pid` in their
+    # details (process_create, network_connection currently); a step
+    # requiring lineage can never match an event with no pid.
+    require_lineage: bool = False
 
 
 class CorrelationScenario(BaseModel):
@@ -94,6 +127,7 @@ class CorrelationScenario(BaseModel):
     enabled: bool = True
     window_minutes: float = Field(default=15.0, gt=0)
     steps: list[CorrelationStep] = Field(min_length=1)
+    mitre_technique: str | None = None
     source_file: str = ""
 
 
