@@ -46,6 +46,67 @@ jobs:
       - name: Build the PyInstaller bundle
         run: pyinstaller sentinelguard.spec
 
+      - name: Smoke test the packaged executable
+        # Actually launches the compiled .exe (not just checks it
+        # compiled) and confirms the agent responds on real Windows --
+        # this is exactly the check that would have caught the
+        # BaseHTTPMiddleware/ProactorEventLoop hang (api/middleware.py)
+        # automatically: the build compiled fine and even ran fine on
+        # every developer's Linux machine, but every request to it on
+        # real Windows hung forever with no response. A build that
+        # can't pass this never gets uploaded as an artifact for anyone
+        # to test by hand.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dataDir = Join-Path $env:RUNNER_TEMP "sg-smoke-data"
+          New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+          $configPath = Join-Path $env:RUNNER_TEMP "sg-smoke-config.yaml"
+          @"
+          data:
+            data_dir: $dataDir
+          api:
+            host: 127.0.0.1
+            port: 8799
+          monitoring:
+            enabled: false
+          "@ | Set-Content -Path $configPath
+
+          $proc = Start-Process -FilePath "dist\SentinelGuard\SentinelGuard.exe" `
+            -ArgumentList "--config `"$configPath`" --serve" `
+            -PassThru -WindowStyle Hidden
+
+          $healthy = $false
+          for ($i = 0; $i -lt 60; $i++) {
+            try {
+              $resp = Invoke-WebRequest -Uri "http://127.0.0.1:8799/api/v1/health" -UseBasicParsing -TimeoutSec 2
+              if ($resp.StatusCode -eq 200) {
+                $healthy = $true
+                break
+              }
+            } catch {
+              Start-Sleep -Seconds 1
+            }
+          }
+
+          if ($proc -and -not $proc.HasExited) {
+            Stop-Process -Id $proc.Id -Force
+          }
+
+          $logFile = Join-Path $dataDir "logs\sentinelguard.log"
+          if (-not $healthy) {
+            Write-Host "::error::Packaged SentinelGuard.exe never responded on /api/v1/health -- the build is broken even though it compiled."
+            if (Test-Path $logFile) {
+              Write-Host "----- sentinelguard.log -----"
+              Get-Content $logFile
+            } else {
+              Write-Host "No log file was created at $logFile -- the executable may not have started at all."
+            }
+            exit 1
+          }
+
+          Write-Host "Packaged executable responded successfully on /api/v1/health."
+
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 

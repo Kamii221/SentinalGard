@@ -783,6 +783,23 @@ the Actions tab (workflow_dispatch) for an ad-hoc build, or push a
 `v*` tag to build a versioned release installer; either way the
 finished `.exe` is uploaded as a workflow artifact.
 
+**It doesn't stop at "did it compile."** A "Smoke test the packaged
+executable" step actually launches the freshly built
+`dist\SentinelGuard\SentinelGuard.exe --serve` and polls
+`/api/v1/health` for up to a minute before letting the build proceed to
+the installer step at all. This is deliberately the exact check that
+would have caught the `BaseHTTPMiddleware`/`ProactorEventLoop` hang
+(see the middleware section above) automatically, in CI, the moment it
+was introduced — that build compiled cleanly and ran fine everywhere
+the test suite touches it (Linux, in-process `TestClient`), and the
+only way to have caught it sooner was to actually run the compiled
+`.exe` on real Windows and check something answers. A build that fails
+this smoke test never gets uploaded as an artifact — nobody has to
+manually test a build that's broken in this specific way ever again.
+On failure the step dumps `sentinelguard.log`'s contents straight into
+the CI job's output, since that's the same file this project ended up
+needing a user to paste by hand more than once.
+
 ## Testing
 
 ```bash
